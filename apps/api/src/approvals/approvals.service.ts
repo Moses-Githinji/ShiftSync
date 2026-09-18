@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { RequestStatus } from '@prisma/client';
 
 @Injectable()
 export class ApprovalsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private auditService: AuditService,
+  ) {}
 
   async getApprovals(userId: string, status?: RequestStatus) {
     const managerLocations = await this.prisma.managerLocation.findMany({
@@ -141,6 +145,14 @@ export class ApprovalsService {
       }
     });
 
+    await this.auditService.logAction({
+      entityType: 'SWAP_REQUEST',
+      entityId: requestId,
+      action: 'SWAP_APPROVED',
+      actorId: userId,
+      reason: `Swap request approved`,
+    });
+
     return { success: true, message: 'Swap request approved' };
   }
 
@@ -169,6 +181,14 @@ export class ApprovalsService {
     await this.prisma.swapRequest.update({
       where: { id: requestId },
       data: { status: 'REJECTED' }
+    });
+
+    await this.auditService.logAction({
+      entityType: 'SWAP_REQUEST',
+      entityId: requestId,
+      action: 'SWAP_DENIED',
+      actorId: userId,
+      reason: reason || 'Swap request denied',
     });
 
     return { success: true, message: 'Swap request denied' };
@@ -209,6 +229,14 @@ export class ApprovalsService {
       });
     });
 
+    await this.auditService.logAction({
+      entityType: 'DROP_REQUEST',
+      entityId: requestId,
+      action: 'DROP_APPROVED',
+      actorId: userId,
+      reason: 'Drop request approved',
+    });
+
     return { success: true, message: 'Drop request approved' };
   }
 
@@ -237,6 +265,14 @@ export class ApprovalsService {
     await this.prisma.dropRequest.update({
       where: { id: requestId },
       data: { status: 'REJECTED' }
+    });
+
+    await this.auditService.logAction({
+      entityType: 'DROP_REQUEST',
+      entityId: requestId,
+      action: 'DROP_DENIED',
+      actorId: userId,
+      reason: reason || 'Drop request denied',
     });
 
     return { success: true, message: 'Drop request denied' };

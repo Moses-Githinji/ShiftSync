@@ -24,4 +24,31 @@ export class AuditService {
       details: log.reason || ''
     }));
   }
+
+  async logAction(params: {
+    entityType: string;
+    entityId: string;
+    action: string;
+    actorId?: string;
+    before?: any;
+    after?: any;
+    reason?: string;
+  }) {
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          entityType: params.entityType,
+          entityId: params.entityId,
+          action: params.action,
+          actorId: params.actorId || null,
+          before: params.before || undefined,
+          after: params.after || undefined,
+          reason: params.reason || null,
+        },
+      });
+    } catch (error) {
+      // Audit logging should never break the main operation
+      console.error('Failed to write audit log:', error);
+    }
+  }
 }

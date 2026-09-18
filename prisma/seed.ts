@@ -12,30 +12,71 @@ const prisma = new PrismaClient({ adapter });
 async function main() {
   console.log('Seeding database...');
 
-  // 1. Create Location
-  const location = await prisma.location.create({
-    data: {
-      name: 'Coastal Eats - Downtown',
-      timezone: 'America/New_York',
-      address: '123 Main St',
-    }
+  // 1. Create Locations (4 locations across 2 time zones)
+  const loc1 = await prisma.location.create({
+    data: { name: 'Coastal Eats - Downtown (NY)', timezone: 'America/New_York', address: '123 Main St, New York' }
   });
+  const loc2 = await prisma.location.create({
+    data: { name: 'Coastal Eats - Uptown (NY)', timezone: 'America/New_York', address: '456 Broadway, New York' }
+  });
+  const loc3 = await prisma.location.create({
+    data: { name: 'Coastal Eats - Beachside (LA)', timezone: 'America/Los_Angeles', address: '789 Ocean Ave, Los Angeles' }
+  });
+  const loc4 = await prisma.location.create({
+    data: { name: 'Coastal Eats - Valley (LA)', timezone: 'America/Los_Angeles', address: '101 Ventura Blvd, Los Angeles' }
+  });
+
+  const location = loc1; // Use loc1 as the default for the rest of the seed data
 
   // 2. Create Users & Staff Profiles
   const passwordHash = await bcrypt.hash('password', 10);
   
+  // ADMIN
+  const adminUser = await prisma.user.create({
+    data: {
+      email: 'admin@coastaleats.com',
+      passwordHash,
+      firstName: 'Admin',
+      lastName: 'User',
+      role: 'ADMIN',
+    }
+  });
+
+  // MANAGER
+  const managerUser = await prisma.user.create({
+    data: {
+      email: 'manager_sf@coastaleats.com',
+      passwordHash,
+      firstName: 'Manager',
+      lastName: 'SF',
+      role: 'MANAGER',
+      managedLocations: {
+        create: [
+          { locationId: loc1.id },
+          { locationId: loc2.id },
+          { locationId: loc3.id },
+          { locationId: loc4.id }
+        ]
+      }
+    }
+  });
+  
+  // STAFF
   const user1 = await prisma.user.create({
     data: {
-      email: 'john@coastaleats.com',
+      email: 'john_bartender@coastaleats.com',
       passwordHash,
       firstName: 'John',
-      lastName: 'Doe',
+      lastName: 'Bartender',
       role: 'STAFF',
       staffProfile: {
         create: {
           desiredHoursPerWeek: 40,
           certifications: {
             create: { locationId: location.id }
+          },
+          skills: {
+            create: { skill: 'Bartender' }
           }
         }
       }
@@ -45,16 +86,19 @@ async function main() {
 
   const user2 = await prisma.user.create({
     data: {
-      email: 'sarah@coastaleats.com',
+      email: 'sarah_cook@coastaleats.com',
       passwordHash,
       firstName: 'Sarah',
-      lastName: 'Smith',
+      lastName: 'Cook',
       role: 'STAFF',
       staffProfile: {
         create: {
           desiredHoursPerWeek: 40,
           certifications: {
             create: { locationId: location.id }
+          },
+          skills: {
+            create: { skill: 'Line Cook' }
           }
         }
       }
@@ -64,16 +108,19 @@ async function main() {
 
   const user3 = await prisma.user.create({
     data: {
-      email: 'mike@coastaleats.com',
+      email: 'maria_server@coastaleats.com',
       passwordHash,
-      firstName: 'Mike',
-      lastName: 'Johnson',
+      firstName: 'Maria',
+      lastName: 'Server',
       role: 'STAFF',
       staffProfile: {
         create: {
           desiredHoursPerWeek: 20, // Part time
           certifications: {
             create: { locationId: location.id }
+          },
+          skills: {
+            create: { skill: 'Server' }
           }
         }
       }

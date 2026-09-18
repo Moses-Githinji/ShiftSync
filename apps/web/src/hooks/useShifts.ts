@@ -14,15 +14,27 @@ export function useStaff(locationId: string | null) {
   });
 }
 
-export function useShifts(locationId: string | null) {
+export function useShifts(locationId: string | null, weekStart?: string) {
   return useQuery({
-    queryKey: ['shifts', locationId],
+    queryKey: ['shifts', locationId, weekStart],
     queryFn: async () => {
       if (!locationId) return [];
-      const { data } = await api.get(`/shifts?locationId=${locationId}`);
+      let url = `/shifts?locationId=${locationId}`;
+      if (weekStart) url += `&weekStart=${weekStart}`;
+      const { data } = await api.get(url);
       return data;
     },
     enabled: !!locationId,
+  });
+}
+
+export function useGlobalShifts() {
+  return useQuery({
+    queryKey: ['shifts', 'global'],
+    queryFn: async () => {
+      const { data } = await api.get('/shifts/all');
+      return data;
+    },
   });
 }
 

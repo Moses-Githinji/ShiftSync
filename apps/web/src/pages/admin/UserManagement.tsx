@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { UsersIcon, PlusIcon, SearchIcon, FilterIcon } from "lucide-react"
+import { UsersIcon, PlusIcon, SearchIcon, FilterIcon, LoaderIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -8,8 +8,8 @@ import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger, SheetFooter, SheetClose } from "@/components/ui/sheet"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { useUsers } from "@/hooks/useAdminData"
-import { LoaderIcon } from "lucide-react"
+import { useUsers, useLocations, useSkills, useCreateSkill, useCreateUser } from "@/hooks/useAdminData"
+import { toast } from "sonner"
 
 export function UserManagement() {
   const [isSheetOpen, setIsSheetOpen] = useState(false);
@@ -17,28 +17,44 @@ export function UserManagement() {
   const itemsPerPage = 5;
 
   const { data: rawUsers = [], isLoading } = useUsers();
+  const { data: locations = [] } = useLocations();
+  const { data: skills = [] } = useSkills();
+  const { mutateAsync: createSkill } = useCreateSkill();
+  const { mutateAsync: createUser, isPending: isCreatingUser } = useCreateUser();
+
+  // Form State
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("");
+  const [location, setLocation] = useState("");
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  
+  // New Skill State
+  const [isAddingSkill, setIsAddingSkill] = useState(false);
+  const [newSkillName, setNewSkillName] = useState("");
+  const [isCreatingSkill, setIsCreatingSkill] = useState(false);
 
   const mappedUsers = rawUsers.map((u: any) => {
-    let location = "None";
+    let loc = "None";
     if (u.role === "ADMIN") {
-      location = "All Locations";
+      loc = "All Locations";
     } else if (u.role === "STAFF" && u.staffProfile?.certifications?.length > 0) {
-      location = u.staffProfile.certifications[0].location.name;
+      loc = u.staffProfile.certifications[0].location.name;
     } else if (u.role === "MANAGER" && u.managedLocations?.length > 0) {
-      location = u.managedLocations[0].location.name;
+      loc = u.managedLocations[0].location.name;
     }
 
-    const skills = u.staffProfile?.skills?.map((s: any) => s.skill) || [];
-    if (u.role === "MANAGER") skills.push("manager");
-    if (u.role === "ADMIN") skills.push("admin");
+    const s = u.staffProfile?.skills?.map((s: any) => s.skill) || [];
+    if (u.role === "MANAGER") s.push("manager");
+    if (u.role === "ADMIN") s.push("admin");
 
     return {
       id: u.id,
       name: `${u.firstName} ${u.lastName}`,
       email: u.email,
       role: u.role,
-      skills,
-      location
+      skills: s,
+      location: loc
     }
   });
   
@@ -47,6 +63,42 @@ export function UserManagement() {
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
+
+  const handleAddSkill = async () => {
+    if (!newSkillName.trim()) return;
+    setIsCreatingSkill(true);
+    try {
+      const created = await createSkill(newSkillName);
+      setSelectedSkills(prev => [...prev, created.name]);
+      setNewSkillName("");
+      setIsAddingSkill(false);
+    } catch (error) {
+      toast.error("Failed to create skill");
+    } finally {
+      setIsCreatingSkill(false);
+    }
+  };
+
+  const handleSaveUser = async () => {
+    if (!name || !email || !role || !location) {
+      toast.error("Please fill in all required fields.");
+      return;
+    }
+    
+    try {
+      await createUser({ name, email, role, location, skills: selectedSkills });
+      toast.success("User created successfully!");
+      setIsSheetOpen(false);
+      // Reset form
+      setName("");
+      setEmail("");
+      setRole("");
+      setLocation("");
+      setSelectedSkills([]);
+    } catch (error) {
+      toast.error("Failed to create user.");
+    }
+  };
 
   return (
     <div className="flex flex-col h-full gap-4 p-4 md:gap-6 md:p-6">
@@ -60,7 +112,7 @@ export function UserManagement() {
           <SheetTrigger asChild>
             <Button><PlusIcon className="mr-2 h-4 w-4" /> Add User</Button>
           </SheetTrigger>
-          <SheetContent className="sm:max-w-106.25 overflow-y-auto">
+          <SheetContent className="sm:max-w-106.25 overflow-y-auto px-6">
             <SheetHeader>
               <SheetTitle>Add New User</SheetTitle>
               <SheetDescription>
@@ -70,16 +122,16 @@ export function UserManagement() {
 
             <div className="grid gap-4 py-6">
               <div className="grid gap-2">
-                <Label htmlFor="name">Full Name</Label>
-                <Input id="name" placeholder="e.g. Jane Doe" />
+                <Label htmlFor="name">Full Name *</Label>
+                <Input id="name" placeholder="e.g. Jane Doe" value={name} onChange={e => setName(e.target.value)} />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" placeholder="e.g. jane@coastaleats.com" />
+                <Label htmlFor="email">Email *</Label>
+                <Input id="email" type="email" placeholder="e.g. jane@coastaleats.com" value={email} onChange={e => setEmail(e.target.value)} />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="role">Role</Label>
-                <Select>
+                <Label htmlFor="role">Role *</Label>
+                <Select value={role} onValueChange={setRole}>
                   <SelectTrigger id="role">
                     <SelectValue placeholder="Select a role" />
                   </SelectTrigger>
@@ -91,36 +143,63 @@ export function UserManagement() {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="location">Primary Location</Label>
-                <Select>
+                <Label htmlFor="location">Primary Location *</Label>
+                <Select value={location} onValueChange={setLocation}>
                   <SelectTrigger id="location">
                     <SelectValue placeholder="Select a location" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Downtown Branch">Downtown Branch</SelectItem>
-                    <SelectItem value="Westside Location">Westside Location</SelectItem>
-                    <SelectItem value="Midwest Hub">Midwest Hub</SelectItem>
-                    <SelectItem value="Southern Branch">Southern Branch</SelectItem>
+                    {locations.map((loc: any) => (
+                      <SelectItem key={loc.id} value={loc.name}>{loc.name}</SelectItem>
+                    ))}
                     <SelectItem value="All Locations">All Locations (Admin)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
               <div className="grid gap-2 pt-2">
-                <Label>Skills & Certifications</Label>
-                <div className="flex flex-col gap-3 mt-2 border rounded-md p-3 bg-muted/50">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox id="skill-bartender" />
-                    <label htmlFor="skill-bartender" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Bartender</label>
+                <div className="flex items-center justify-between">
+                  <Label>Skills & Certifications</Label>
+                  <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setIsAddingSkill(!isAddingSkill)}>
+                    <PlusIcon className="h-3 w-3 mr-1" /> New Skill
+                  </Button>
+                </div>
+                
+                {isAddingSkill && (
+                  <div className="flex items-center gap-2 mt-1">
+                    <Input 
+                      placeholder="Enter skill name..." 
+                      className="h-8 text-sm" 
+                      value={newSkillName}
+                      onChange={e => setNewSkillName(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleAddSkill()}
+                    />
+                    <Button size="sm" className="h-8" onClick={handleAddSkill} disabled={isCreatingSkill || !newSkillName.trim()}>
+                      {isCreatingSkill ? <LoaderIcon className="h-3 w-3 animate-spin" /> : "Add"}
+                    </Button>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox id="skill-server" />
-                    <label htmlFor="skill-server" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Server</label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox id="skill-cook" />
-                    <label htmlFor="skill-cook" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Line Cook</label>
-                  </div>
+                )}
+
+                <div className="flex flex-col gap-3 mt-2 border rounded-md p-3 bg-muted/50 max-h-40 overflow-y-auto">
+                  {skills.length === 0 ? (
+                    <span className="text-sm text-muted-foreground">No skills available. Create one above.</span>
+                  ) : (
+                    skills.map((skill: any) => (
+                      <div key={skill.id} className="flex items-center space-x-2">
+                        <Checkbox 
+                          id={`skill-${skill.id}`} 
+                          checked={selectedSkills.includes(skill.name)}
+                          onCheckedChange={(checked) => {
+                            if (checked) setSelectedSkills(prev => [...prev, skill.name]);
+                            else setSelectedSkills(prev => prev.filter(s => s !== skill.name));
+                          }}
+                        />
+                        <label htmlFor={`skill-${skill.id}`} className="text-sm font-medium leading-none capitalize">
+                          {skill.name.replace(/_/g, ' ')}
+                        </label>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -129,7 +208,10 @@ export function UserManagement() {
               <SheetClose asChild>
                 <Button variant="outline">Cancel</Button>
               </SheetClose>
-              <Button onClick={() => setIsSheetOpen(false)}>Save User</Button>
+              <Button onClick={handleSaveUser} disabled={isCreatingUser}>
+                {isCreatingUser && <LoaderIcon className="mr-2 h-4 w-4 animate-spin" />}
+                Save User
+              </Button>
             </SheetFooter>
           </SheetContent>
         </Sheet>
@@ -186,7 +268,7 @@ export function UserManagement() {
                 <TableCell>{user.location}</TableCell>
                 <TableCell>
                   <div className="flex gap-1 flex-wrap">
-                    {user.skills.map((s: string) => <Badge key={s} variant="outline" className="capitalize">{s.replace('_', ' ')}</Badge>)}
+                    {user.skills.map((s: string) => <Badge key={s} variant="outline" className="capitalize">{s.replace(/_/g, ' ')}</Badge>)}
                   </div>
                 </TableCell>
                 <TableCell className="text-right">

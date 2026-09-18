@@ -222,3 +222,10 @@ model AuditLog {
   actor      User?    @relation("Actor", fields: [actorId], references: [id])
   shift      Shift?   @relation(fields: [entityId], references: [id], map: "AuditLog_shift")
 }
+
+model Skill {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+}
+

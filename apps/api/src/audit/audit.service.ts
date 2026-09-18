@@ -18,8 +18,9 @@ export class AuditService {
     return logs.map(log => ({
       id: log.id,
       action: log.action,
+      entityType: log.entityType,
       user: log.actor?.email || 'System',
-      target: log.entityId, // we could join to get names but entityId is fine for demo
+      target: log.entityId,
       date: log.createdAt,
       details: log.reason || ''
     }));

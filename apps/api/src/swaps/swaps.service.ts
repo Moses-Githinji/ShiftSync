@@ -1,19 +1,52 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
+
+const MAX_PENDING_REQUESTS = 3;
 
 @Injectable()
 export class SwapsService {
   constructor(
     private prisma: PrismaService,
     private auditService: AuditService,
+    private notificationsService: NotificationsService,
   ) {}
 
+  // ─── Helpers ─────────────────────────────────────────────────────────────
+
+  private async getPendingRequestCount(userId: string): Promise<number> {
+    const [swaps, drops] = await Promise.all([
+      this.prisma.swapRequest.count({
+        where: {
+          fromStaffId: userId,
+          status: { in: ['PENDING', 'ACCEPTED'] },
+        },
+      }),
+      this.prisma.dropRequest.count({
+        where: {
+          staffId: userId,
+          status: 'PENDING',
+        },
+      }),
+    ]);
+    return swaps + drops;
+  }
+
+  // ─── Swaps ────────────────────────────────────────────────────────────────
+
   async requestSwap(userId: string, shiftId: string, toStaffId: string) {
-    // Basic checks
     const shift = await this.prisma.shift.findUnique({ where: { id: shiftId } });
     if (!shift) throw new NotFoundException('Shift not found');
-    
+
+    // 3-request limit
+    const pendingCount = await this.getPendingRequestCount(userId);
+    if (pendingCount >= MAX_PENDING_REQUESTS) {
+      throw new BadRequestException(
+        `You have reached the maximum of ${MAX_PENDING_REQUESTS} pending requests. Please wait for existing requests to be resolved.`,
+      );
+    }
+
     const result = await this.prisma.swapRequest.create({
       data: {
         shiftId,
@@ -21,6 +54,19 @@ export class SwapsService {
         toStaffId,
         status: 'PENDING',
       },
+      include: {
+        fromStaff: { select: { firstName: true, lastName: true } },
+        shift: { include: { location: true } },
+      },
+    });
+
+    // Notify the target staff member
+    await this.notificationsService.createNotification({
+      userId: toStaffId,
+      type: 'SWAP_REQUESTED',
+      title: 'Swap Request',
+      body: `${result.fromStaff.firstName} ${result.fromStaff.lastName} wants to swap their ${result.shift.location.name} shift with you.`,
+      data: { swapRequestId: result.id, shiftId },
     });
 
     await this.auditService.logAction({
@@ -35,27 +81,79 @@ export class SwapsService {
   }
 
   async acceptSwap(userId: string, requestId: string) {
-    const request = await this.prisma.swapRequest.findUnique({ where: { id: requestId } });
+    const request = await this.prisma.swapRequest.findUnique({
+      where: { id: requestId },
+      include: {
+        shift: { include: { location: true } },
+        fromStaff: { select: { id: true, firstName: true, lastName: true } },
+        toStaff: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
     if (!request || request.toStaffId !== userId) {
       throw new NotFoundException('Request not found or unauthorized');
     }
-    
-    return this.prisma.swapRequest.update({
+    if (request.status !== 'PENDING') {
+      throw new BadRequestException('Request is no longer pending');
+    }
+
+    await this.prisma.swapRequest.update({
       where: { id: requestId },
-      data: { status: 'ACCEPTED' }, // Moves to manager approval
+      data: { status: 'ACCEPTED' },
     });
+
+    // Notify the requester
+    await this.notificationsService.createNotification({
+      userId: request.fromStaffId,
+      type: 'SWAP_UPDATE',
+      title: 'Swap Accepted',
+      body: `${request.toStaff?.firstName} ${request.toStaff?.lastName} accepted your swap request. Awaiting manager approval.`,
+      data: { swapRequestId: requestId },
+    });
+
+    // Notify manager(s) of the location
+    const managers = await this.prisma.managerLocation.findMany({
+      where: { locationId: request.shift.locationId },
+      select: { userId: true },
+    });
+    for (const mgr of managers) {
+      await this.notificationsService.createNotification({
+        userId: mgr.userId,
+        type: 'SWAP_UPDATE',
+        title: 'Swap Awaiting Approval',
+        body: `A swap request for a ${request.shift.location.name} shift has been accepted and needs your approval.`,
+        data: { swapRequestId: requestId },
+      });
+    }
+
+    return { success: true, message: 'Swap accepted. Awaiting manager approval.' };
   }
 
   async declineSwap(userId: string, requestId: string) {
-    const request = await this.prisma.swapRequest.findUnique({ where: { id: requestId } });
+    const request = await this.prisma.swapRequest.findUnique({
+      where: { id: requestId },
+      include: {
+        toStaff: { select: { firstName: true, lastName: true } },
+      },
+    });
     if (!request || request.toStaffId !== userId) {
       throw new NotFoundException('Request not found or unauthorized');
     }
-    
-    return this.prisma.swapRequest.update({
+
+    await this.prisma.swapRequest.update({
       where: { id: requestId },
       data: { status: 'REJECTED' },
     });
+
+    // Notify the requester
+    await this.notificationsService.createNotification({
+      userId: request.fromStaffId,
+      type: 'SWAP_UPDATE',
+      title: 'Swap Declined',
+      body: `${request.toStaff?.firstName} ${request.toStaff?.lastName} declined your swap request.`,
+      data: { swapRequestId: requestId },
+    });
+
+    return { success: true, message: 'Swap declined.' };
   }
 
   async getIncomingSwaps(userId: string) {
@@ -63,26 +161,92 @@ export class SwapsService {
       where: { toStaffId: userId, status: 'PENDING' },
       include: {
         shift: { include: { location: true } },
-        fromStaff: true,
+        fromStaff: { select: { id: true, firstName: true, lastName: true } },
       },
+      orderBy: { createdAt: 'desc' },
     });
   }
 
-  // --- Drops ---
+  async getMyRequests(userId: string) {
+    const [swapRequests, dropRequests] = await Promise.all([
+      this.prisma.swapRequest.findMany({
+        where: { fromStaffId: userId },
+        include: {
+          shift: { include: { location: true } },
+          toStaff: { select: { id: true, firstName: true, lastName: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+      this.prisma.dropRequest.findMany({
+        where: { staffId: userId },
+        include: {
+          shift: { include: { location: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+    ]);
+
+    return {
+      swapRequests: swapRequests.map(r => ({
+        id: r.id,
+        type: 'SWAP',
+        status: r.status,
+        shiftId: r.shiftId,
+        shift: r.shift,
+        toStaff: r.toStaff,
+        createdAt: r.createdAt,
+        expiresAt: r.expiresAt,
+      })),
+      dropRequests: dropRequests.map(r => ({
+        id: r.id,
+        type: 'DROP',
+        status: r.status,
+        shiftId: r.shiftId,
+        shift: r.shift,
+        expiresAt: r.expiresAt,
+        createdAt: r.createdAt,
+      })),
+    };
+  }
+
+  // ─── Drops ────────────────────────────────────────────────────────────────
 
   async requestDrop(userId: string, shiftId: string) {
     const shift = await this.prisma.shift.findUnique({ where: { id: shiftId } });
     if (!shift) throw new NotFoundException('Shift not found');
 
-    const twoDaysBefore = new Date(shift.startAt);
-    twoDaysBefore.setHours(twoDaysBefore.getHours() - 48);
+    // 3-request limit
+    const pendingCount = await this.getPendingRequestCount(userId);
+    if (pendingCount >= MAX_PENDING_REQUESTS) {
+      throw new BadRequestException(
+        `You have reached the maximum of ${MAX_PENDING_REQUESTS} pending requests.`,
+      );
+    }
+
+    // Check for existing pending drop on same shift
+    const existing = await this.prisma.dropRequest.findFirst({
+      where: { shiftId, staffId: userId, status: 'PENDING' },
+    });
+    if (existing) {
+      throw new BadRequestException('You already have a pending drop request for this shift.');
+    }
+
+    // Fix: expires 24h before the shift starts (not 48h)
+    const expiresAt = new Date(shift.startAt);
+    expiresAt.setHours(expiresAt.getHours() - 24);
 
     const result = await this.prisma.dropRequest.create({
       data: {
         shiftId,
         staffId: userId,
         status: 'PENDING',
-        expiresAt: twoDaysBefore,
+        expiresAt,
+      },
+      include: {
+        shift: { include: { location: true } },
+        staff: { select: { firstName: true, lastName: true } },
       },
     });
 
@@ -98,65 +262,70 @@ export class SwapsService {
   }
 
   async getAvailableDrops(userId: string) {
-    // Find drop requests that are pending and NOT from the current user
+    const now = new Date();
     return this.prisma.dropRequest.findMany({
       where: {
         status: 'PENDING',
         staffId: { not: userId },
+        expiresAt: { gt: now }, // not yet expired
+        shift: { startAt: { gt: now } }, // shift hasn't started
       },
       include: {
         shift: { include: { location: true } },
-        staff: true,
+        staff: { select: { id: true, firstName: true, lastName: true } },
       },
+      orderBy: { shift: { startAt: 'asc' } },
     });
   }
 
   async claimDrop(userId: string, requestId: string) {
-    const request = await this.prisma.dropRequest.findUnique({ where: { id: requestId } });
+    const request = await this.prisma.dropRequest.findUnique({
+      where: { id: requestId },
+      include: {
+        shift: { include: { location: true } },
+        staff: { select: { firstName: true, lastName: true } },
+      },
+    });
     if (!request) throw new NotFoundException('Drop request not found');
     if (request.staffId === userId) throw new BadRequestException('Cannot claim your own drop');
+    if (request.status !== 'PENDING') throw new BadRequestException('This drop is no longer available');
 
-    // Accept it, and it will go to manager approval (wait, drops don't have a "toStaffId" in schema, they just get "ACCEPTED" and maybe we need a way to track WHO accepted it?)
-    // Ah, schema for DropRequest:
-    // staffId: User.id (the one dropping)
-    // shiftId: String
-    // status: RequestStatus
-    // Wait, how do we track who is claiming the drop before the manager approves?
-    // Maybe we need a DropClaim model? The schema doesn't have one!
-    // Let me check schema.prisma: DropRequest has `id, shiftId, staffId, status, expiresAt`. It doesn't have a `claimedById`!
-    // Since we can't easily change the schema right now (I'd need to write Prisma migration), let's just make claimDrop immediately assign it to the new user if we want to keep it simple, or we can use the `SwapRequest` model for drops too!
-    // Let's use `SwapRequest` where `toStaffId` is null for a drop, but when someone claims it, they create a new SwapRequest where they are `toStaffId`? No, let's just bypass manager approval for claiming drops, or immediately update the DropRequest status to APPROVED and assign the shift.
-    // The user said: "Manager Approval: proceed. But remember to make these statuses simple to understand".
-    // If a drop is claimed, maybe we just assign it. Let's just assign the shift directly when claimed.
-    // Wait, better yet, we can create a `SwapRequest` when someone claims a drop to represent the claim!
-    // Actually, I'll just change the ShiftAssignment and update the drop request to APPROVED immediately for drops to save complexity.
-    
-    const staffProfile = await this.prisma.staffProfile.findUnique({ where: { userId } });
-    if (!staffProfile) throw new NotFoundException('Staff profile not found');
+    // Get StaffProfile for the claimer
+    const claimerProfile = await this.prisma.staffProfile.findUnique({ where: { userId } });
+    if (!claimerProfile) throw new NotFoundException('Staff profile not found');
 
-    await this.prisma.dropRequest.update({
-      where: { id: requestId },
-      data: { status: 'APPROVED' },
-    });
+    // Get StaffProfile for the dropper
+    const dropperProfile = await this.prisma.staffProfile.findUnique({ where: { userId: request.staffId } });
 
-    // Update assignment
-    await this.prisma.shiftAssignment.deleteMany({
-      where: { shiftId: request.shiftId, staffId: request.staffId }, // Assuming request.staffId is User.id, wait, staffId in ShiftAssignment is StaffProfile.id.
-    });
-    
-    // We need the staff profile of the dropee
-    const dropeeProfile = await this.prisma.staffProfile.findUnique({ where: { userId: request.staffId } });
-    if (dropeeProfile) {
-      await this.prisma.shiftAssignment.deleteMany({
-        where: { shiftId: request.shiftId, staffId: dropeeProfile.id },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.dropRequest.update({
+        where: { id: requestId },
+        data: { status: 'APPROVED' },
       });
-    }
 
-    await this.prisma.shiftAssignment.create({
-      data: {
-        shiftId: request.shiftId,
-        staffId: staffProfile.id,
-      },
+      // Remove original assignment if it exists
+      if (dropperProfile) {
+        await tx.shiftAssignment.deleteMany({
+          where: { shiftId: request.shiftId, staffId: dropperProfile.id },
+        });
+      }
+
+      // Create new assignment for claimer
+      await tx.shiftAssignment.upsert({
+        where: { shiftId_staffId: { shiftId: request.shiftId, staffId: claimerProfile.id } },
+        update: {},
+        create: { shiftId: request.shiftId, staffId: claimerProfile.id },
+      });
+    });
+
+    // Notify original staff member
+    const claimerUser = await this.prisma.user.findUnique({ where: { id: userId }, select: { firstName: true, lastName: true } });
+    await this.notificationsService.createNotification({
+      userId: request.staffId,
+      type: 'SWAP_UPDATE',
+      title: 'Your Drop Was Claimed',
+      body: `${claimerUser?.firstName} ${claimerUser?.lastName} picked up your ${request.shift.location.name} shift.`,
+      data: { dropRequestId: requestId },
     });
 
     await this.auditService.logAction({
@@ -168,5 +337,71 @@ export class SwapsService {
     });
 
     return { success: true };
+  }
+
+  // ─── Open Shifts ─────────────────────────────────────────────────────────
+
+  async claimOpenShift(userId: string, shiftId: string) {
+    const shift = await this.prisma.shift.findUnique({
+      where: { id: shiftId },
+      include: { assignments: true, location: true },
+    });
+    if (!shift) throw new NotFoundException('Shift not found');
+    if (shift.status !== 'PUBLISHED') throw new BadRequestException('Shift is not published');
+    if (shift.assignments.length > 0) throw new BadRequestException('Shift already has an assignment');
+
+    const staffProfile = await this.prisma.staffProfile.findUnique({ where: { userId } });
+    if (!staffProfile) throw new NotFoundException('Staff profile not found');
+
+    // Check the staff is certified for this location
+    const cert = await this.prisma.staffLocationCertification.findFirst({
+      where: { staffProfileId: staffProfile.id, locationId: shift.locationId },
+    });
+    if (!cert) throw new BadRequestException('You are not certified for this location');
+
+    // Check for schedule conflicts
+    const shiftDuration = (shift.endAt.getTime() - shift.startAt.getTime()) / (1000 * 60 * 60);
+    const existingAssignments = await this.prisma.shiftAssignment.findMany({
+      where: { staffId: staffProfile.id },
+      include: { shift: true },
+    });
+
+    for (const a of existingAssignments) {
+      const s = new Date(a.shift.startAt).getTime();
+      const e = new Date(a.shift.endAt).getTime();
+      if (Math.max(s, shift.startAt.getTime()) < Math.min(e, shift.endAt.getTime())) {
+        throw new BadRequestException('This shift overlaps with one of your existing shifts.');
+      }
+    }
+
+    await this.prisma.shiftAssignment.create({
+      data: { shiftId, staffId: staffProfile.id },
+    });
+
+    await this.auditService.logAction({
+      entityType: 'SHIFT',
+      entityId: shiftId,
+      action: 'SHIFT_CLAIMED',
+      actorId: userId,
+      reason: `Open shift claimed by staff`,
+    });
+
+    // Notify managers
+    const managers = await this.prisma.managerLocation.findMany({
+      where: { locationId: shift.locationId },
+      select: { userId: true },
+    });
+    const claimerUser = await this.prisma.user.findUnique({ where: { id: userId }, select: { firstName: true, lastName: true } });
+    for (const mgr of managers) {
+      await this.notificationsService.createNotification({
+        userId: mgr.userId,
+        type: 'SHIFT_ASSIGNED',
+        title: 'Open Shift Claimed',
+        body: `${claimerUser?.firstName} ${claimerUser?.lastName} picked up an open shift at ${shift.location.name}.`,
+        data: { shiftId },
+      });
+    }
+
+    return { success: true, message: 'Shift claimed successfully' };
   }
 }

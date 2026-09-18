@@ -15,21 +15,16 @@ import { AnalyticsDashboard } from './pages/manager/AnalyticsDashboard';
 import { LocationManagement } from './pages/admin/LocationManagement';
 import { UserManagement } from './pages/admin/UserManagement';
 import { AuditLogs } from './pages/admin/AuditLogs';
+import { StaffDashboard } from './pages/staff/StaffDashboard';
+import { MySchedule } from './pages/staff/MySchedule';
+import { AvailabilityPage } from './pages/staff/AvailabilityPage';
 import { SwapBoard } from './pages/staff/SwapBoard';
-
-// Basic placeholders for unbuilt pages
-const PlaceholderPage = ({ title }: { title: string }) => (
-  <div className="flex flex-1 flex-col p-4 md:p-6">
-    <h1 className="text-3xl font-bold">{title}</h1>
-    <p className="text-muted-foreground mt-2">This feature page is currently under construction.</p>
-  </div>
-);
 
 const DashboardIndex = () => {
   const user = useAuthStore((state) => state.user);
   if (user?.role === 'ADMIN') return <AdminDashboard />;
   if (user?.role === 'MANAGER') return <ManagerDashboard />;
-  return <PlaceholderPage title="Staff Dashboard" />;
+  return <StaffDashboard />;
 };
 
 export default function App() {
@@ -55,13 +50,12 @@ export default function App() {
             <Route path="/dashboard/analytics" element={<AnalyticsDashboard />} />
             
             {/* Staff Routes */}
-            <Route path="/dashboard/schedule" element={<PlaceholderPage title="My Schedule" />} />
-            <Route path="/dashboard/availability" element={<PlaceholderPage title="Availability Settings" />} />
+            <Route path="/dashboard/schedule" element={<MySchedule />} />
+            <Route path="/dashboard/availability" element={<AvailabilityPage />} />
             <Route path="/dashboard/swaps" element={<SwapBoard />} />
           </Route>
         </Route>
 
-        {/* Redirect root to dashboard (which handles auth redirect automatically) */}
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

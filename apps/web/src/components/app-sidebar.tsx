@@ -12,10 +12,40 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { LayoutDashboardIcon, ListIcon, ChartBarIcon, FolderIcon, UsersIcon, Settings2Icon, CalendarClockIcon, CalendarCheckIcon, RefreshCcwIcon, CommandIcon, LogOutIcon } from "lucide-react"
+import {
+  LayoutDashboardIcon,
+  ListIcon,
+  ChartBarIcon,
+  FolderIcon,
+  UsersIcon,
+  Settings2Icon,
+  CalendarClockIcon,
+  CalendarCheckIcon,
+  RefreshCcwIcon,
+  CommandIcon,
+  LogOutIcon,
+} from "lucide-react"
+import { useUnreadNotificationCount } from "@/hooks/useStaffFeatures"
+
+function StaffNavItems() {
+  const { data: unreadCount = 0 } = useUnreadNotificationCount();
+  return [
+    { title: "Dashboard", url: "/dashboard", icon: <LayoutDashboardIcon /> },
+    {
+      title: "My Schedule",
+      url: "/dashboard/schedule",
+      icon: <CalendarClockIcon />,
+      badge: unreadCount > 0 ? String(unreadCount > 9 ? "9+" : unreadCount) : undefined,
+    },
+    { title: "Availability", url: "/dashboard/availability", icon: <Settings2Icon /> },
+    { title: "Swap Board", url: "/dashboard/swaps", icon: <RefreshCcwIcon /> },
+  ];
+}
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { user, logout } = useAuthStore();
+  const isStaff = user?.role === 'STAFF';
+  const staffNavItems = isStaff ? StaffNavItems() : [];
 
   const getNavMain = () => {
     if (!user) return [];
@@ -36,13 +66,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         { title: "Analytics", url: "/dashboard/analytics", icon: <ChartBarIcon /> },
       ];
     }
-    // Staff
-    return [
-      { title: "Dashboard", url: "/dashboard", icon: <LayoutDashboardIcon /> },
-      { title: "My Schedule", url: "/dashboard/schedule", icon: <CalendarClockIcon /> },
-      { title: "Availability", url: "/dashboard/availability", icon: <Settings2Icon /> },
-      { title: "Swap Board", url: "/dashboard/swaps", icon: <RefreshCcwIcon /> },
-    ];
+    // Staff — items are computed with live badge count
+    return staffNavItems;
   };
 
   const navSecondary = [

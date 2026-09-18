@@ -1,12 +1,14 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class ShiftsService {
   constructor(
     private prisma: PrismaService,
     private auditService: AuditService,
+    private notificationsService: NotificationsService,
   ) {}
 
   async getShifts(locationId: string, weekStart?: string) {
@@ -193,6 +195,35 @@ export class ShiftsService {
       });
     });
 
+    // Auto-cancel any PENDING swap requests for this shift (edge case)
+    const pendingSwaps = await this.prisma.swapRequest.findMany({
+      where: { shiftId, status: { in: ['PENDING', 'ACCEPTED'] } },
+    });
+    for (const swap of pendingSwaps) {
+      await this.prisma.swapRequest.update({
+        where: { id: swap.id },
+        data: { status: 'CANCELLED' },
+      });
+      // Notify requester
+      await this.notificationsService.createNotification({
+        userId: swap.fromStaffId,
+        type: 'SWAP_UPDATE',
+        title: 'Swap Request Cancelled',
+        body: 'Your swap request was automatically cancelled because a manager changed the shift assignment.',
+        data: { swapRequestId: swap.id, shiftId },
+      });
+      // Notify target if set
+      if (swap.toStaffId) {
+        await this.notificationsService.createNotification({
+          userId: swap.toStaffId,
+          type: 'SWAP_UPDATE',
+          title: 'Swap Request Cancelled',
+          body: 'A swap request you were part of was cancelled because a manager changed the shift.',
+          data: { swapRequestId: swap.id, shiftId },
+        });
+      }
+    }
+
     const staffName = `${staff.user.firstName} ${staff.user.lastName}`;
     await this.auditService.logAction({
       entityType: 'SHIFT',
@@ -204,6 +235,7 @@ export class ShiftsService {
 
     return { success: true, message: 'Shift assigned successfully' };
   }
+
 
   async publishSchedule(locationId: string, actorId?: string) {
     const shifts = await this.prisma.shift.findMany({

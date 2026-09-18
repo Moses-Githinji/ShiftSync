@@ -60,6 +60,16 @@ export function useIncomingSwaps() {
   });
 }
 
+export function useMyRequests() {
+  return useQuery({
+    queryKey: ['swaps', 'my-requests'],
+    queryFn: async () => {
+      const { data } = await api.get('/swaps/my-requests');
+      return data;
+    },
+  });
+}
+
 export function useAvailableDrops() {
   return useQuery({
     queryKey: ['drops', 'available'],
@@ -78,7 +88,8 @@ export function useRequestSwap() {
       return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['swaps', 'my-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
       toast.success('Swap requested successfully');
     },
     onError: (error: any) => {
@@ -95,8 +106,9 @@ export function useRequestDrop() {
       return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      toast.success('Shift dropped successfully');
+      queryClient.invalidateQueries({ queryKey: ['swaps', 'my-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
+      toast.success('Shift dropped — it will appear on the Swap Board');
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Failed to drop shift');
@@ -131,12 +143,81 @@ export function useClaimDrop() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['drops', 'available'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
       queryClient.invalidateQueries({ queryKey: ['shifts'] });
       toast.success('Shift claimed successfully');
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Failed to claim shift');
     }
+  });
+}
+
+export function useClaimOpenShift() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (shiftId: string) => {
+      const { data } = await api.post(`/shifts/${shiftId}/claim`);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['drops', 'available'] });
+      queryClient.invalidateQueries({ queryKey: ['shifts'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
+      toast.success('Open shift claimed successfully');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to claim shift');
+    }
+  });
+}
+
+// --- Notifications ---
+
+export function useNotifications() {
+  return useQuery({
+    queryKey: ['notifications'],
+    queryFn: async () => {
+      const { data } = await api.get('/notifications');
+      return data;
+    },
+    refetchInterval: 30000, // Poll every 30s
+  });
+}
+
+export function useUnreadNotificationCount() {
+  return useQuery({
+    queryKey: ['notifications', 'unread-count'],
+    queryFn: async () => {
+      const { data } = await api.get('/notifications/unread-count');
+      return data as number;
+    },
+    refetchInterval: 30000,
+  });
+}
+
+export function useMarkNotificationRead() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (notificationId: string) => {
+      const { data } = await api.patch(`/notifications/${notificationId}/read`);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
+  });
+}
+
+export function useMarkAllNotificationsRead() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data } = await api.patch('/notifications/read-all');
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
   });
 }

@@ -46,8 +46,6 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-const columnHelper = createColumnHelper()
-
 interface StaffData {
   id: string
   userId: string
@@ -67,6 +65,19 @@ interface StaffData {
   assignmentsCount: number
 }
 
+const features = tableFeatures({
+  columnFilteringFeature,
+  columnVisibilityFeature,
+  rowPaginationFeature,
+  rowSelectionFeature,
+  rowSortingFeature,
+  filteredRowModel: createFilteredRowModel(),
+  paginatedRowModel: createPaginatedRowModel(),
+  sortedRowModel: createSortedRowModel(),
+})
+
+const columnHelper = createColumnHelper<typeof features, StaffData>()
+
 function formatDate(dateString: string) {
   return new Date(dateString).toLocaleDateString("en-US", {
     month: "short",
@@ -80,16 +91,6 @@ function getDayName(dayOfWeek: number) {
   return days[dayOfWeek]
 }
 
-const features = tableFeatures({
-  columnFilteringFeature,
-  columnVisibilityFeature,
-  rowPaginationFeature,
-  rowSelectionFeature,
-  rowSortingFeature,
-  filteredRowModel: createFilteredRowModel(),
-  paginatedRowModel: createPaginatedRowModel(),
-  sortedRowModel: createSortedRowModel(),
-})
 
 export function StaffTable({ data: initialData }: { data: StaffData[] }) {
   const [rowSelection, setRowSelection] = React.useState({})
@@ -102,7 +103,8 @@ export function StaffTable({ data: initialData }: { data: StaffData[] }) {
   })
 
   const columns = React.useMemo(() => [
-    columnHelper.accessor((row: StaffData) => row.user, {
+    columnHelper.accessor((row: StaffData) => row.user.firstName, {
+      id: "name",
       header: "Name",
       cell: ({ row }) => {
         const user = row.original.user
@@ -113,11 +115,13 @@ export function StaffTable({ data: initialData }: { data: StaffData[] }) {
         )
       },
     }),
-    columnHelper.accessor((row: StaffData) => row.user, {
+    columnHelper.accessor((row: StaffData) => row.user.email, {
+      id: "email",
       header: "Email",
       cell: ({ row }) => row.original.user.email,
     }),
-    columnHelper.accessor((row: StaffData) => row.user, {
+    columnHelper.accessor((row: StaffData) => row.user.role, {
+      id: "role",
       header: "Role",
       cell: ({ row }) => (
         <Badge variant="outline">{row.original.user.role}</Badge>
@@ -167,7 +171,8 @@ export function StaffTable({ data: initialData }: { data: StaffData[] }) {
       header: "Assignments",
       cell: ({ row }) => row.original.assignmentsCount.toString(),
     }),
-    columnHelper.accessor((row: StaffData) => row.user, {
+    columnHelper.accessor((row: StaffData) => row.user.createdAt, {
+      id: "joined",
       header: "Joined",
       cell: ({ row }) => formatDate(row.original.user.createdAt),
     }),
@@ -195,7 +200,7 @@ export function StaffTable({ data: initialData }: { data: StaffData[] }) {
   const table = useTable({
     features,
     data: initialData,
-    columns,
+    columns: columns as any,
     state: {
       sorting,
       columnVisibility,
@@ -224,9 +229,9 @@ export function StaffTable({ data: initialData }: { data: StaffData[] }) {
                     {header.isPlaceholder
                       ? null
                       : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
+                        header.column.columnDef.header,
+                        header.getContext()
+                      )}
                   </TableHead>
                 ))}
               </TableRow>
@@ -286,7 +291,7 @@ export function StaffTable({ data: initialData }: { data: StaffData[] }) {
           to{" "}
           {Math.min(
             (pagination.pageIndex + 1) *
-              pagination.pageSize,
+            pagination.pageSize,
             table.getFilteredRowModel().rows.length
           )}{" "}
           of {table.getFilteredRowModel().rows.length} results
@@ -296,7 +301,7 @@ export function StaffTable({ data: initialData }: { data: StaffData[] }) {
             value={`${pagination.pageSize}`}
             onValueChange={(value) => table.setPageSize(Number(value))}
           >
-            <SelectTrigger className="w-[100px] h-8">
+            <SelectTrigger className="w-25 h-8">
               <SelectValue placeholder="Page size" />
             </SelectTrigger>
             <SelectContent>

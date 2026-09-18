@@ -40,10 +40,10 @@ interface PieChartProps {
   className?: string
 }
 
-export function PieChartComponent({ 
-  data, 
+export function PieChartComponent({
+  data,
   config = {},
-  className 
+  className
 }: PieChartProps) {
   const chartConfig: ChartConfig = {
     ...config,
@@ -56,7 +56,7 @@ export function PieChartComponent({
   if (data.length === 0) {
     return (
       <ChartContainer config={chartConfig} className={className}>
-        <div className="flex items-center justify-center h-[250px] w-full text-muted-foreground">
+        <div className="flex items-center justify-center h-62.5 w-full text-muted-foreground">
           No shift data for selected day
         </div>
       </ChartContainer>
@@ -91,7 +91,10 @@ export function PieChartComponent({
           <Tooltip
             content={
               <ChartTooltipContent
-                formatter={(value: number | undefined) => [value !== undefined ? `${value.toFixed(1)}` : "0", "Hours"]}
+                formatter={(value: any) => {
+                  const numValue = typeof value === 'number' ? value : parseFloat(value as string);
+                  return [!isNaN(numValue) ? `${numValue.toFixed(1)}` : "0", "Hours"];
+                }}
               />
             }
           />

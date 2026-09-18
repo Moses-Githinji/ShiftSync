@@ -47,9 +47,9 @@ export function ManagerDashboard() {
         <>
           <SectionCards 
             metrics={[
-              { title: 'Pending Approvals', value: data?.pendingApprovals || 0, footer: 'Swap and drop requests needing review' },
-              { title: 'Active Shifts', value: data?.activeShifts || 0, footer: 'Published shifts across your locations' },
-              { title: 'Overtime Alerts', value: data?.overtimeAlerts || 0, trend: 'neutral', badge: '0 issues', footer: 'Staff approaching overtime limits' },
+              { title: 'Pending Approvals', value: data?.pendingApprovals ?? 0, footer: 'Swap and drop requests needing review' },
+              { title: 'Active Shifts', value: data?.activeShifts ?? 0, footer: 'Published shifts across your locations' },
+              { title: 'Overtime Alerts', value: data?.overtimeAlerts ?? 0, trend: (data?.overtimeAlerts ?? 0) > 0 ? 'down' : 'up', badge: (data?.overtimeAlerts ?? 0) > 0 ? `${data.overtimeAlerts} at risk` : 'All clear', footer: 'Staff near or over overtime limits' },
             ]} 
           />
           

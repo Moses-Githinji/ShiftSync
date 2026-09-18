@@ -26,10 +26,10 @@ export function AdminDashboard() {
         <SectionCards 
           layout="horizontal"
           metrics={[
-            { title: 'Total Locations', value: data?.locations || 0, footer: 'Active Coastal Eats locations' },
-            { title: 'Total Staff', value: data?.staff || 0, footer: 'Registered employees' },
-            { title: 'Active Shifts', value: data?.activeShifts || 0, footer: 'Currently published shifts' },
-            { title: 'System Health', value: data?.systemHealth || '100%', trend: 'up', badge: 'Optimal', footer: 'All systems operational' }
+            { title: 'Total Locations', value: data?.locations ?? 0, footer: 'Active Coastal Eats locations' },
+            { title: 'Total Staff', value: data?.staff ?? 0, footer: 'Registered employees' },
+            { title: 'Active Shifts', value: data?.activeShifts ?? 0, footer: 'Currently published shifts' },
+            { title: 'Pending Requests', value: data?.pendingRequests ?? 0, footer: 'Swap & drop requests awaiting review' },
           ]} 
         />
       )}

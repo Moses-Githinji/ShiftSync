@@ -432,14 +432,21 @@ export class DashboardService {
   }
 
   private async getAdminStats() {
-    const locations = await this.prisma.location.count();
-    const staff = await this.prisma.user.count({ where: { role: Role.STAFF } });
-    const activeShifts = await this.prisma.shift.count({ where: { status: 'PUBLISHED' } });
-    
+    const [locations, staff, activeShifts, pendingSwaps, pendingDrops] = await Promise.all([
+      this.prisma.location.count(),
+      this.prisma.user.count({ where: { role: Role.STAFF } }),
+      this.prisma.shift.count({ where: { status: 'PUBLISHED' } }),
+      this.prisma.swapRequest.count({ where: { status: 'PENDING' } }),
+      this.prisma.dropRequest.count({ where: { status: 'PENDING' } }),
+    ]);
+
+    const pendingRequests = pendingSwaps + pendingDrops;
+
     return {
       locations,
       staff,
       activeShifts,
+      pendingRequests,
       systemHealth: '100%',
     };
   }
@@ -451,25 +458,77 @@ export class DashboardService {
     });
     const locationIds = managerLocations.map(ml => ml.locationId);
 
-    const pendingApprovals = await this.prisma.swapRequest.count({
-      where: { shift: { locationId: { in: locationIds } }, status: 'PENDING' }
-    });
-    const activeShifts = await this.prisma.shift.count({
-      where: { locationId: { in: locationIds }, status: 'PUBLISHED' }
-    });
+    const [pendingSwaps, pendingDrops, activeShifts, staffProfiles] = await Promise.all([
+      this.prisma.swapRequest.count({
+        where: { shift: { locationId: { in: locationIds } }, status: 'PENDING' }
+      }),
+      this.prisma.dropRequest.count({
+        where: { shift: { locationId: { in: locationIds } }, status: 'PENDING' }
+      }),
+      this.prisma.shift.count({
+        where: { locationId: { in: locationIds }, status: 'PUBLISHED' }
+      }),
+      this.prisma.staffProfile.findMany({
+        where: { certifications: { some: { locationId: { in: locationIds } } } },
+        include: {
+          assignments: {
+            include: { shift: true }
+          }
+        }
+      }),
+    ]);
+
+    const pendingApprovals = pendingSwaps + pendingDrops;
+
+    // Count staff members who exceed their desired hours
+    const overtimeAlerts = staffProfiles.filter(staff => {
+      const maxHours = staff.desiredHoursPerWeek || 40;
+      const totalHours = staff.assignments.reduce((sum, a) => {
+        return sum + (new Date(a.shift.endAt).getTime() - new Date(a.shift.startAt).getTime()) / (1000 * 60 * 60);
+      }, 0);
+      return totalHours > maxHours * 0.8; // near or over limit
+    }).length;
 
     return {
       pendingApprovals,
       activeShifts,
-      overtimeAlerts: 0, // Mock for now
+      overtimeAlerts,
     };
   }
 
   private async getStaffStats(userId: string) {
-    const staffProfile = await this.prisma.staffProfile.findUnique({ where: { userId } });
+    const staffProfile = await this.prisma.staffProfile.findUnique({
+      where: { userId },
+      include: {
+        assignments: {
+          include: { shift: { include: { location: true } } },
+          orderBy: { shift: { startAt: 'asc' } }
+        }
+      }
+    });
     if (!staffProfile) return {};
 
-    const hoursThisWeek = 0; // Mock calculation
+    const now = new Date();
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay()); // Sunday
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 7);
+
+    // Upcoming shifts (future)
+    const upcomingAssignments = staffProfile.assignments.filter(a => new Date(a.shift.startAt) >= now);
+
+    // Hours scheduled this week
+    const hoursScheduled = staffProfile.assignments
+      .filter(a => {
+        const start = new Date(a.shift.startAt);
+        return start >= weekStart && start < weekEnd;
+      })
+      .reduce((sum, a) => {
+        return sum + (new Date(a.shift.endAt).getTime() - new Date(a.shift.startAt).getTime()) / (1000 * 60 * 60);
+      }, 0);
+
+    // Pending swap requests
     const pendingSwaps = await this.prisma.swapRequest.count({
       where: {
         OR: [{ fromStaffId: userId }, { toStaffId: userId }],
@@ -477,17 +536,31 @@ export class DashboardService {
       }
     });
 
-    const upcomingShifts = await this.prisma.shiftAssignment.findMany({
-      where: { staffId: staffProfile.id, shift: { startAt: { gte: new Date() } } },
-      include: { shift: { include: { location: true } } },
-      take: 5,
-      orderBy: { shift: { startAt: 'asc' } }
-    });
+    // Open shifts at the staff's certified locations (unassigned, published, future)
+    const certifiedLocationIds = staffProfile.assignments.length > 0
+      ? (await this.prisma.staffLocationCertification.findMany({
+          where: { staffProfileId: staffProfile.id },
+          select: { locationId: true }
+        })).map(c => c.locationId)
+      : [];
+
+    const openShifts = certifiedLocationIds.length > 0
+      ? await this.prisma.shift.count({
+          where: {
+            locationId: { in: certifiedLocationIds },
+            status: 'PUBLISHED',
+            startAt: { gte: now },
+            assignments: { none: {} },
+          }
+        })
+      : 0;
 
     return {
-      hoursThisWeek,
+      hoursScheduled: Math.round(hoursScheduled * 10) / 10,
       pendingSwaps,
-      upcomingShifts,
+      openShifts,
+      upcomingShifts: upcomingAssignments.slice(0, 5),
+      allShifts: staffProfile.assignments,
     };
   }
 }

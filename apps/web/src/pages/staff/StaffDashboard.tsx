@@ -12,16 +12,16 @@ import { AvailabilityManager } from "@/components/staff/AvailabilityManager"
 
 export function StaffDashboard() {
   const { data, isLoading } = useDashboardStats();
-  
+
   const [currentPage, setCurrentPage] = useState(1);
   const [manageModalOpen, setManageModalOpen] = useState(false);
   const [selectedShift, setSelectedShift] = useState<any>(null);
-  
+
   const itemsPerPage = 5;
-  
+
   const shifts = data?.upcomingShifts || [];
   const totalPages = Math.ceil(shifts.length / itemsPerPage);
-  
+
   const currentShifts = shifts.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
@@ -35,8 +35,8 @@ export function StaffDashboard() {
       </div>
 
       <div className="px-4 lg:px-6">
-        <Tabs defaultValue="schedule" className="w-full">
-          <TabsList className="mb-4">
+        <Tabs defaultValue="schedule" className="w-full flex gap-1 flex-col h-[calc(100vh-200px)]">
+          <TabsList className="mb-4 gap-1 bg-none">
             <TabsTrigger value="schedule">My Schedule</TabsTrigger>
             <TabsTrigger value="availability">My Availability</TabsTrigger>
           </TabsList>
@@ -50,9 +50,9 @@ export function StaffDashboard() {
               <>
                 <SectionCards
                   metrics={[
-                    { title: "Upcoming Shifts", value: shifts.length.toString(), footer: "This week" },
-                    { title: "Hours Scheduled", value: data?.hoursScheduled?.toString() || "0", footer: "This week" },
-                    { title: "Open Shifts", value: data?.openShifts?.toString() || "0", footer: "Available to claim" },
+                    { title: "Upcoming Shifts", value: shifts.length, footer: "From today onwards" },
+                    { title: "Hours This Week", value: data?.hoursScheduled ?? 0, footer: "Scheduled hours this week" },
+                    { title: "Open Shifts", value: data?.openShifts ?? 0, footer: "Available at your locations" },
                   ]}
                 />
 
@@ -63,7 +63,7 @@ export function StaffDashboard() {
                       <CalendarIcon className="w-4 h-4 mr-2" /> Sync to Calendar
                     </Button>
                   </div>
-                  
+
                   <div className="border rounded-lg bg-card">
                     <Table>
                       <TableHeader>
@@ -83,8 +83,8 @@ export function StaffDashboard() {
                           </TableRow>
                         ) : (
                           currentShifts.map((assignment: any) => (
-                            <TableRow 
-                              key={assignment.id} 
+                            <TableRow
+                              key={assignment.id}
                               className="cursor-pointer hover:bg-muted/50"
                               onClick={() => {
                                 setSelectedShift(assignment)
@@ -104,24 +104,24 @@ export function StaffDashboard() {
                         )}
                       </TableBody>
                     </Table>
-                    
+
                     {shifts.length > 0 && (
                       <div className="flex items-center justify-between px-4 py-4 border-t">
                         <div className="text-sm text-muted-foreground">
                           Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, shifts.length)} of {shifts.length} entries
                         </div>
                         <div className="flex items-center space-x-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
+                          <Button
+                            variant="outline"
+                            size="sm"
                             onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                             disabled={currentPage === 1}
                           >
                             Previous
                           </Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
+                          <Button
+                            variant="outline"
+                            size="sm"
                             onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                             disabled={currentPage === totalPages || totalPages === 0}
                           >
@@ -142,10 +142,10 @@ export function StaffDashboard() {
         </Tabs>
       </div>
 
-      <ManageStaffShiftModal 
-        open={manageModalOpen} 
-        onOpenChange={setManageModalOpen} 
-        shiftAssignment={selectedShift} 
+      <ManageStaffShiftModal
+        open={manageModalOpen}
+        onOpenChange={setManageModalOpen}
+        shiftAssignment={selectedShift}
       />
     </div>
   )

@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
@@ -11,6 +12,23 @@ const prisma = new PrismaClient({ adapter });
 
 async function main() {
   console.log('Seeding database...');
+
+  // Clean existing seed data for idempotency (child tables first)
+  await prisma.dropRequest.deleteMany();
+  await prisma.swapRequest.deleteMany();
+  await prisma.shiftAssignment.deleteMany();
+  await prisma.shift.deleteMany();
+  await prisma.availabilityWindow.deleteMany();
+  await prisma.availabilityException.deleteMany();
+  await prisma.staffSkill.deleteMany();
+  await prisma.staffLocationCertification.deleteMany();
+  await prisma.staffProfile.deleteMany();
+  await prisma.managerLocation.deleteMany();
+  await prisma.notification.deleteMany();
+  await prisma.auditLog.deleteMany();
+  await prisma.user.deleteMany();
+  await prisma.location.deleteMany();
+  await prisma.skill.deleteMany();
 
   // 1. Create Locations (4 locations across 2 time zones)
   const loc1 = await prisma.location.create({

@@ -144,7 +144,7 @@ export function ScheduleBuilder() {
             onOpenChange={setAddModalOpen}
             prefilledDate={prefilledDate}
             prefilledStaffId={prefilledStaffId}
-            staffList={staffList}
+            staffList={MOCK_STAFF}
             allShifts={shifts}
             trigger={
               <Button variant="outline" onClick={() => {

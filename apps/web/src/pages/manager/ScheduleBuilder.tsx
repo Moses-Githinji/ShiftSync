@@ -6,11 +6,18 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { useStaff, useShifts, usePublishSchedule } from "@/hooks/useShifts"
+import { useStaff, useShifts, usePublishSchedule, useUnpublishSchedule } from "@/hooks/useShifts"
 import { useLocations } from "@/hooks/useAdminData"
 import { DateTime } from 'luxon'
 import { AddShiftModal } from "@/components/AddShiftModal"
 import { EditShiftModal } from "@/components/EditShiftModal"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 // --- Types ---
 export type Staff = { id: string; name: string; maxHours: number; skills: string[] }
@@ -47,11 +54,13 @@ export function ScheduleBuilder() {
   const [prefilledStaffId, setPrefilledStaffId] = useState<string | null>(null)
 
   const { data: locations = [] } = useLocations();
-  const locationId = locations[0]?.id || "";
+  const [selectedLocId, setSelectedLocId] = useState<string>("");
+  const locationId = selectedLocId || locations[0]?.id || "";
 
   const { data: rawStaff = [] } = useStaff(locationId || null);
   const { data: rawShifts = [] } = useShifts(locationId || null, weekStart.toISODate() ?? undefined);
   const { mutate: publishSchedule } = usePublishSchedule();
+  const { mutate: unpublishSchedule } = useUnpublishSchedule();
 
   // Map Server Staff to UI Shape
   const MOCK_STAFF: Staff[] = rawStaff.length > 0 ? rawStaff.map((s: any) => ({
@@ -83,6 +92,10 @@ export function ScheduleBuilder() {
     publishSchedule(locationId)
   }
 
+  const handleUnpublishSchedule = () => {
+    unpublishSchedule(locationId)
+  }
+
   const handleCellClick = (staffId: string, dateIso: string) => {
     setPrefilledStaffId(staffId)
     setPrefilledDate(dateIso)
@@ -110,13 +123,27 @@ export function ScheduleBuilder() {
             Click on any empty cell to assign a shift, or click an existing shift to edit it.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {locations.length > 1 && (
+            <Select value={locationId} onValueChange={setSelectedLocId}>
+              <SelectTrigger className="w-50">
+                <SelectValue placeholder="Select Location" />
+              </SelectTrigger>
+              <SelectContent>
+                {locations.map((loc: any) => (
+                  <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <AddShiftModal 
             locationId={locationId} 
             open={addModalOpen}
             onOpenChange={setAddModalOpen}
             prefilledDate={prefilledDate}
             prefilledStaffId={prefilledStaffId}
+            staffList={staffList}
+            allShifts={shifts}
             trigger={
               <Button variant="outline" onClick={() => {
                 setPrefilledDate(undefined)
@@ -126,6 +153,9 @@ export function ScheduleBuilder() {
               </Button>
             }
           />
+          <Button variant="outline" onClick={handleUnpublishSchedule} className="text-muted-foreground">
+            Unpublish
+          </Button>
           <Button onClick={handlePublishSchedule} className="bg-green-600 hover:bg-green-700 text-white">
             <SendIcon className="mr-2 h-4 w-4" /> Publish Schedule
           </Button>

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 const MAX_PENDING_REQUESTS = 3;
 
@@ -11,6 +12,7 @@ export class SwapsService {
     private prisma: PrismaService,
     private auditService: AuditService,
     private notificationsService: NotificationsService,
+    private notificationsGateway: NotificationsGateway,
   ) {}
 
   // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -77,6 +79,9 @@ export class SwapsService {
       reason: `Swap requested for shift ${shiftId}`,
     });
 
+    this.notificationsGateway.notifyLocation(shift.locationId, 'swap_requested', { type: 'SWAP' });
+    this.notificationsGateway.notifyUser(toStaffId, 'swap_requested', { type: 'SWAP' });
+
     return result;
   }
 
@@ -124,6 +129,9 @@ export class SwapsService {
         data: { swapRequestId: requestId },
       });
     }
+
+    this.notificationsGateway.notifyLocation(request.shift.locationId, 'swap_updated', { type: 'SWAP_ACCEPTED' });
+    this.notificationsGateway.notifyUser(request.fromStaffId, 'swap_updated', { type: 'SWAP_ACCEPTED' });
 
     return { success: true, message: 'Swap accepted. Awaiting manager approval.' };
   }
@@ -258,6 +266,8 @@ export class SwapsService {
       reason: `Drop requested for shift ${shiftId}`,
     });
 
+    this.notificationsGateway.notifyLocation(shift.locationId, 'swap_requested', { type: 'DROP' });
+
     return result;
   }
 
@@ -294,27 +304,23 @@ export class SwapsService {
     const claimerProfile = await this.prisma.staffProfile.findUnique({ where: { userId } });
     if (!claimerProfile) throw new NotFoundException('Staff profile not found');
 
-    // Get StaffProfile for the dropper
-    const dropperProfile = await this.prisma.staffProfile.findUnique({ where: { userId: request.staffId } });
+    let newSwapRequest: any;
 
     await this.prisma.$transaction(async (tx) => {
+      // Mark the original drop request as CANCELLED so it's removed from the board
       await tx.dropRequest.update({
         where: { id: requestId },
-        data: { status: 'APPROVED' },
+        data: { status: 'CANCELLED' },
       });
 
-      // Remove original assignment if it exists
-      if (dropperProfile) {
-        await tx.shiftAssignment.deleteMany({
-          where: { shiftId: request.shiftId, staffId: dropperProfile.id },
-        });
-      }
-
-      // Create new assignment for claimer
-      await tx.shiftAssignment.upsert({
-        where: { shiftId_staffId: { shiftId: request.shiftId, staffId: claimerProfile.id } },
-        update: {},
-        create: { shiftId: request.shiftId, staffId: claimerProfile.id },
+      // Create a SwapRequest that is already ACCEPTED
+      newSwapRequest = await tx.swapRequest.create({
+        data: {
+          shiftId: request.shiftId,
+          fromStaffId: request.staffId,
+          toStaffId: userId,
+          status: 'ACCEPTED',
+        },
       });
     });
 
@@ -324,19 +330,36 @@ export class SwapsService {
       userId: request.staffId,
       type: 'SWAP_UPDATE',
       title: 'Your Drop Was Claimed',
-      body: `${claimerUser?.firstName} ${claimerUser?.lastName} picked up your ${request.shift.location.name} shift.`,
-      data: { dropRequestId: requestId },
+      body: `${claimerUser?.firstName} ${claimerUser?.lastName} picked up your ${request.shift.location.name} shift. Awaiting manager approval.`,
+      data: { swapRequestId: newSwapRequest.id },
     });
+
+    // Notify manager(s) of the location
+    const managers = await this.prisma.managerLocation.findMany({
+      where: { locationId: request.shift.locationId },
+      select: { userId: true },
+    });
+    for (const mgr of managers) {
+      await this.notificationsService.createNotification({
+        userId: mgr.userId,
+        type: 'SWAP_UPDATE',
+        title: 'Drop Claim Awaiting Approval',
+        body: `A drop request for a ${request.shift.location.name} shift has been claimed and needs your approval.`,
+        data: { swapRequestId: newSwapRequest.id },
+      });
+    }
 
     await this.auditService.logAction({
       entityType: 'DROP_REQUEST',
       entityId: requestId,
       action: 'DROP_CLAIMED',
       actorId: userId,
-      reason: `Drop claimed and shift reassigned`,
+      reason: `Drop claimed and converted to an accepted swap request awaiting manager approval`,
     });
 
-    return { success: true };
+    this.notificationsGateway.notifyLocation(request.shift.locationId, 'swap_updated', { type: 'DROP_CLAIMED' });
+
+    return { success: true, message: 'Drop claimed. Awaiting manager approval.' };
   }
 
   // ─── Open Shifts ─────────────────────────────────────────────────────────
@@ -401,6 +424,8 @@ export class SwapsService {
         data: { shiftId },
       });
     }
+
+    this.notificationsGateway.notifyLocation(shift.locationId, 'schedule_updated', { type: 'OPEN_SHIFT_CLAIMED', shiftId });
 
     return { success: true, message: 'Shift claimed successfully' };
   }

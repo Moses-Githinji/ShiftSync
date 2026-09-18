@@ -6,6 +6,7 @@ import { useDashboardStats, useStaffHoursByDay, useAllStaff } from "@/hooks/useD
 import { SectionCards } from "@/components/section-cards"
 import { PieChartComponent } from "@/components/ui/pie-chart"
 import { StaffTable } from "@/components/staff-table"
+import { OnDutyDashboard } from "@/components/manager/OnDutyDashboard"
 import {
   Select,
   SelectContent,
@@ -53,8 +54,10 @@ export function ManagerDashboard() {
             ]} 
           />
           
-          <div className="px-4 lg:px-6">
-            <Card className="mb-6">
+          <div className="px-4 lg:px-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <OnDutyDashboard locations={data?.locations || []} />
+            
+            <Card className="mb-6 h-fit">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Hours by Staff Member</CardTitle>
                 <Select value={selectedDay.toString()} onValueChange={(v) => setSelectedDay(Number(v))}>

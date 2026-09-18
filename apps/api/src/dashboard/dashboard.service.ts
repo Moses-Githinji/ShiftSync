@@ -154,9 +154,10 @@ export class DashboardService {
   async getAnalytics(userId: string) {
     const managerLocations = await this.prisma.managerLocation.findMany({
       where: { userId },
-      select: { locationId: true }
+      include: { location: true }
     });
-    const locationIds = managerLocations.map(ml => ml.locationId);
+    const locationsMap = new Map(managerLocations.map(ml => [ml.location.id, ml.location]));
+    const locationIds = Array.from(locationsMap.keys());
 
     if (locationIds.length === 0) {
       return {
@@ -206,12 +207,26 @@ export class DashboardService {
       }
     });
 
-    // Calculate overtime risks
-    const overtimeRisks = staffProfiles.map(staff => {
+    const luxon = require('luxon');
+
+    // Calculate overtime risks and premium shifts
+    const staffStats = staffProfiles.map(staff => {
       const maxHours = staff.desiredHoursPerWeek || 40;
       const assignedShifts = staff.assignments;
+      let premiumShiftsCount = 0;
+
       const totalHours = assignedShifts.reduce((sum, a) => {
-        const duration = (new Date(a.shift.endAt).getTime() - new Date(a.shift.startAt).getTime()) / (1000 * 60 * 60);
+        const shift = a.shift;
+        const loc = locationsMap.get(shift.locationId);
+        if (loc) {
+          const startLocal = luxon.DateTime.fromJSDate(shift.startAt).setZone(loc.timezone);
+          const dayOfWeek = startLocal.weekday; // 1=Mon, 5=Fri, 6=Sat, 7=Sun
+          if ((dayOfWeek === 5 || dayOfWeek === 6) && startLocal.hour >= 17) {
+            premiumShiftsCount++;
+          }
+        }
+
+        const duration = (new Date(shift.endAt).getTime() - new Date(shift.startAt).getTime()) / (1000 * 60 * 60);
         return sum + duration;
       }, 0);
       
@@ -222,11 +237,15 @@ export class DashboardService {
         name: `${staff.user.firstName} ${staff.user.lastName}`,
         desiredHours: maxHours,
         assignedHours: Math.round(totalHours * 10) / 10,
+        premiumShiftsCount,
         percentage: Math.round(percentage),
         isOverLimit: totalHours > maxHours,
         isNearLimit: totalHours > maxHours * 0.8 && totalHours <= maxHours,
+        isUnderScheduled: totalHours > 0 && totalHours < maxHours * 0.5,
       };
-    }).filter(r => r.assignedHours > 0);
+    });
+
+    const overtimeRisks = staffStats.filter(r => r.assignedHours > 0);
 
     // Calculate constraint violations
     const constraintViolations: any[] = [];
@@ -354,7 +373,7 @@ export class DashboardService {
     }
 
     // Calculate fairness metrics
-    const hoursDistribution = overtimeRisks.map(r => r.assignedHours).sort((a, b) => a - b);
+    const hoursDistribution = staffStats.filter(r => r.assignedHours > 0).map(r => r.assignedHours).sort((a, b) => a - b);
     const totalStaff = hoursDistribution.length;
     const totalHours = hoursDistribution.reduce((a, b) => a + b, 0);
     const avgHours = totalStaff > 0 ? totalHours / totalStaff : 0;
@@ -362,6 +381,16 @@ export class DashboardService {
     // Calculate standard deviation
     const variance = hoursDistribution.reduce((sum, h) => sum + Math.pow(h - avgHours, 2), 0) / (totalStaff || 1);
     const stdDev = Math.sqrt(variance);
+
+    // Premium Shift Fairness
+    const premiumDistribution = staffStats.filter(r => r.assignedHours > 0).map(s => s.premiumShiftsCount);
+    const avgPremium = totalStaff > 0 ? premiumDistribution.reduce((a,b) => a+b, 0) / totalStaff : 0;
+    const premiumVariance = premiumDistribution.reduce((sum, c) => sum + Math.pow(c - avgPremium, 2), 0) / (totalStaff || 1);
+    const premiumStdDev = Math.sqrt(premiumVariance);
+    
+    const premiumFairnessScore = totalStaff > 1 && avgPremium > 0 
+      ? Math.max(0, 100 - (premiumStdDev / avgPremium) * 100) 
+      : 100;
     
     const fairnessMetrics = {
       totalStaff,
@@ -371,6 +400,8 @@ export class DashboardService {
       minHours: hoursDistribution[0] || 0,
       maxHours: hoursDistribution[totalStaff - 1] || 0,
       fairnessScore: totalStaff > 1 ? Math.max(0, 100 - (stdDev / (avgHours || 1)) * 100) : 100,
+      premiumFairnessScore: Math.round(premiumFairnessScore),
+      avgPremiumShifts: Math.round(avgPremium * 10) / 10
     };
 
     // Generate warnings
@@ -489,10 +520,16 @@ export class DashboardService {
       return totalHours > maxHours * 0.8; // near or over limit
     }).length;
 
+    const locations = await this.prisma.location.findMany({
+      where: { id: { in: locationIds } },
+      select: { id: true, name: true }
+    });
+
     return {
       pendingApprovals,
       activeShifts,
       overtimeAlerts,
+      locations,
     };
   }
 

@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
+import { useEffect } from 'react';
+import { useSocket } from '../providers/SocketProvider';
 
 // --- Availability ---
 
@@ -51,6 +53,27 @@ export function useAddAvailabilityException() {
 // --- Swaps & Drops ---
 
 export function useIncomingSwaps() {
+  const queryClient = useQueryClient();
+  const { socket } = useSocket();
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleSwapUpdate = () => {
+      queryClient.invalidateQueries({ queryKey: ['swaps'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardStats'] });
+      queryClient.invalidateQueries({ queryKey: ['shifts'] });
+    };
+
+    socket.on('swap_requested', handleSwapUpdate);
+    socket.on('swap_updated', handleSwapUpdate);
+
+    return () => {
+      socket.off('swap_requested', handleSwapUpdate);
+      socket.off('swap_updated', handleSwapUpdate);
+    };
+  }, [socket, queryClient]);
+
   return useQuery({
     queryKey: ['swaps', 'incoming'],
     queryFn: async () => {

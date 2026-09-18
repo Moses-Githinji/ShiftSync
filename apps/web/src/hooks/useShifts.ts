@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
+import { useEffect } from 'react';
+import { useSocket } from '../providers/SocketProvider';
 
 export function useStaff(locationId: string | null) {
   return useQuery({
@@ -15,6 +17,25 @@ export function useStaff(locationId: string | null) {
 }
 
 export function useShifts(locationId: string | null, weekStart?: string) {
+  const queryClient = useQueryClient();
+  const { socket } = useSocket();
+
+  useEffect(() => {
+    if (!socket || !locationId) return;
+
+    socket.emit('joinLocation', locationId);
+
+    const handleScheduleUpdated = () => {
+      queryClient.invalidateQueries({ queryKey: ['shifts'] });
+    };
+
+    socket.on('schedule_updated', handleScheduleUpdated);
+
+    return () => {
+      socket.off('schedule_updated', handleScheduleUpdated);
+    };
+  }, [socket, locationId, queryClient]);
+
   return useQuery({
     queryKey: ['shifts', locationId, weekStart],
     queryFn: async () => {
@@ -42,8 +63,8 @@ export function useAssignShift() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ shiftId, staffProfileId, date }: { shiftId: string; staffProfileId: string | null; date?: string }) => {
-      const { data } = await api.patch(`/shifts/${shiftId}/assign`, { staffProfileId, date });
+    mutationFn: async ({ shiftId, staffProfileId, date, overrideReason }: { shiftId: string; staffProfileId: string | null; date?: string; overrideReason?: string }) => {
+      const { data } = await api.patch(`/shifts/${shiftId}/assign`, { staffProfileId, date, overrideReason });
       return data;
     },
     onSuccess: () => {
@@ -89,6 +110,25 @@ export function usePublishSchedule() {
     },
     onError: (error: any) => {
       const message = error.response?.data?.message || 'Failed to publish schedule';
+      toast.error(message);
+    }
+  });
+}
+
+export function useUnpublishSchedule() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (locationId: string) => {
+      const { data } = await api.patch('/shifts/unpublish', { locationId });
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['shifts'] });
+      toast.success('Schedule unpublished successfully');
+    },
+    onError: (error: any) => {
+      const message = error.response?.data?.message || 'Failed to unpublish schedule';
       toast.error(message);
     }
   });

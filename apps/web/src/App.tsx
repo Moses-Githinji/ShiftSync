@@ -27,8 +27,11 @@ const DashboardIndex = () => {
   return <StaffDashboard />;
 };
 
+import { SocketProvider } from './providers/SocketProvider';
+
 export default function App() {
   return (
+    <SocketProvider>
     <TooltipProvider>
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -61,5 +64,6 @@ export default function App() {
       </Routes>
       <Toaster />
     </TooltipProvider>
+    </SocketProvider>
   );
 }

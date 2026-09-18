@@ -151,7 +151,6 @@ model Shift {
   assignments   ShiftAssignment[]
   swapRequests  SwapRequest[]
   dropRequests  DropRequest[]
-  auditLogs     AuditLog[]
 }
 
 model ShiftAssignment {
@@ -220,7 +219,6 @@ model AuditLog {
   createdAt  DateTime @default(now())
 
   actor      User?    @relation("Actor", fields: [actorId], references: [id])
-  shift      Shift?   @relation(fields: [entityId], references: [id], map: "AuditLog_shift")
 }
 
 model Skill {

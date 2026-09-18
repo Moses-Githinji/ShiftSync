@@ -5,6 +5,8 @@ import { useCreateShift, useAssignShift } from "@/hooks/useShifts"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { AlertTriangleIcon, AlertCircleIcon } from "lucide-react"
 import {
   Select,
   SelectContent,
@@ -20,11 +22,14 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { format } from "date-fns"
+import { Staff, Shift } from "@/pages/manager/ScheduleBuilder"
 
 interface AddShiftModalProps {
   locationId: string
   prefilledDate?: string
   prefilledStaffId?: string | null
+  staffList?: Staff[]
+  allShifts?: Shift[]
   open?: boolean
   onOpenChange?: (open: boolean) => void
   onSuccess?: () => void
@@ -35,6 +40,8 @@ export function AddShiftModal({
   locationId,
   prefilledDate,
   prefilledStaffId,
+  staffList = [],
+  allShifts = [],
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   onSuccess,
@@ -50,6 +57,7 @@ export function AddShiftModal({
   const [endTime, setEndTime] = React.useState("17:00")
   const [requiredSkill, setRequiredSkill] = React.useState("")
   const [headcount, setHeadcount] = React.useState(1)
+  const [overrideReason, setOverrideReason] = React.useState("")
 
   // Reset state when modal opens
   React.useEffect(() => {
@@ -59,24 +67,55 @@ export function AddShiftModal({
       setEndTime("17:00")
       setRequiredSkill("")
       setHeadcount(1)
+      setOverrideReason("")
     }
   }, [open, prefilledDate])
 
   const { mutateAsync: createShift, isPending: isCreating } = useCreateShift()
   const { mutateAsync: assignShift, isPending: isAssigning } = useAssignShift()
 
+  const startAt = new Date(startDate)
+  const [startHour, startMin] = startTime.split(":").map(Number)
+  startAt.setHours(startHour, startMin, 0, 0)
+
+  const endAt = new Date(startDate)
+  const [endHour, endMin] = endTime.split(":").map(Number)
+  endAt.setHours(endHour, endMin, 0, 0)
+
+  const shiftHours = Math.max(0, (endAt.getTime() - startAt.getTime()) / (1000 * 60 * 60))
+  const dayId = format(startAt, "yyyy-MM-dd")
+
+  // Calculate What-If Metrics
+  const staff = prefilledStaffId ? staffList.find(s => s.id === prefilledStaffId) : null;
+  const staffOtherShifts = staff ? allShifts.filter(s => s.staffId === staff.id) : [];
+
+  const currentWeeklyHours = staffOtherShifts.reduce((sum, s) => sum + s.hours, 0);
+  const projectedWeeklyHours = staff ? currentWeeklyHours + shiftHours : 0;
+  const maxHours = staff?.maxHours || 40;
+
+  const staffShiftsThisDay = staff ? staffOtherShifts.filter(s => s.dayId === dayId) : [];
+  const currentDailyHours = staffShiftsThisDay.reduce((sum, s) => sum + s.hours, 0);
+  const projectedDailyHours = staff ? currentDailyHours + shiftHours : 0;
+
+  const uniqueDays = new Set(staffOtherShifts.map(s => s.dayId));
+  if (staff) uniqueDays.add(dayId);
+  const consecutiveDays = uniqueDays.size;
+
+  const isDailyOver12 = projectedDailyHours > 12;
+  const isWeeklyOver40 = projectedWeeklyHours > maxHours;
+  const isWeeklyWarning = projectedWeeklyHours >= 35 && !isWeeklyOver40;
+  const isDailyWarning = projectedDailyHours > 8 && !isDailyOver12;
+  const is7thDay = consecutiveDays >= 7;
+  const is6thDay = consecutiveDays === 6;
+
+  const needsOverride = is7thDay;
+  const isBlocked = isDailyOver12 || (needsOverride && !overrideReason.trim()) || (endAt <= startAt);
+
   const isPending = isCreating || isAssigning
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
-    const startAt = new Date(startDate)
-    const [startHour, startMin] = startTime.split(":").map(Number)
-    startAt.setHours(startHour, startMin, 0, 0)
-
-    const endAt = new Date(startDate)
-    const [endHour, endMin] = endTime.split(":").map(Number)
-    endAt.setHours(endHour, endMin, 0, 0)
+    if (isBlocked) return;
 
     if (endAt <= startAt) {
       alert("End time must be after start time")
@@ -97,7 +136,8 @@ export function AddShiftModal({
         await assignShift({
           shiftId: shiftData.id,
           staffProfileId: prefilledStaffId,
-          date: startAt.toISOString()
+          date: startAt.toISOString(),
+          overrideReason: needsOverride ? overrideReason : undefined
         })
       }
 
@@ -181,11 +221,68 @@ export function AddShiftModal({
                 />
               </div>
             )}
+
+            {staff && (
+              <div className="space-y-3 mt-4 border rounded-md p-4 bg-muted/10">
+                <div className="flex justify-between items-center">
+                  <h4 className="font-semibold text-sm">What-If Analysis</h4>
+                  <span className="text-xs text-muted-foreground font-medium bg-muted px-2 py-1 rounded-md">{staff.name}</span>
+                </div>
+
+                {/* Weekly Hours */}
+                <div className={`flex justify-between items-center text-sm ${isWeeklyOver40 ? 'text-destructive font-medium' : isWeeklyWarning ? 'text-yellow-600 font-medium' : ''}`}>
+                  <span>Projected Weekly Hours:</span>
+                  <span>{projectedWeeklyHours}h / {maxHours}h</span>
+                </div>
+                {isWeeklyOver40 && (
+                  <p className="text-xs text-destructive flex items-center mt-1"><AlertCircleIcon className="h-3 w-3 mr-1" /> Overtime limit exceeded.</p>
+                )}
+                {isWeeklyWarning && (
+                  <p className="text-xs text-yellow-600 flex items-center mt-1"><AlertTriangleIcon className="h-3 w-3 mr-1" /> Approaching overtime limit.</p>
+                )}
+
+                {/* Daily Hours */}
+                <div className={`flex justify-between items-center text-sm mt-2 ${isDailyOver12 ? 'text-destructive font-medium' : isDailyWarning ? 'text-yellow-600 font-medium' : ''}`}>
+                  <span>Projected Daily Hours:</span>
+                  <span>{projectedDailyHours}h</span>
+                </div>
+                {isDailyOver12 && (
+                  <p className="text-xs text-destructive flex items-center mt-1"><AlertCircleIcon className="h-3 w-3 mr-1" /> Labor Law Block: Exceeds 12 hours.</p>
+                )}
+                {isDailyWarning && (
+                  <p className="text-xs text-yellow-600 flex items-center mt-1"><AlertTriangleIcon className="h-3 w-3 mr-1" /> Daily hours exceed 8 hours.</p>
+                )}
+
+                {/* Consecutive Days */}
+                <div className={`flex justify-between items-center text-sm mt-2 ${is7thDay ? 'text-destructive font-medium' : is6thDay ? 'text-yellow-600 font-medium' : ''}`}>
+                  <span>Consecutive Days Worked:</span>
+                  <span>{consecutiveDays} days</span>
+                </div>
+                {is7thDay && (
+                  <div className="mt-2 space-y-2">
+                    <p className="text-xs text-destructive flex items-center"><AlertCircleIcon className="h-3 w-3 mr-1" /> 7th consecutive day requires manager override.</p>
+                    <Label htmlFor="overrideReason" className="text-xs font-semibold">Override Reason (Required)</Label>
+                    <Textarea
+                      id="overrideReason"
+                      value={overrideReason}
+                      onChange={(e) => setOverrideReason(e.target.value)}
+                      placeholder="Enter justification for scheduling 7 consecutive days..."
+                      className="text-sm min-h-15"
+                      required
+                    />
+                  </div>
+                )}
+                {is6thDay && (
+                  <p className="text-xs text-yellow-600 flex items-center mt-1"><AlertTriangleIcon className="h-3 w-3 mr-1" /> 6th consecutive day warning.</p>
+                )}
+              </div>
+            )}
+
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isPending}>
+              <Button type="submit" disabled={isPending || isBlocked}>
                 {isPending ? "Creating..." : "Create Shift"}
               </Button>
             </DialogFooter>

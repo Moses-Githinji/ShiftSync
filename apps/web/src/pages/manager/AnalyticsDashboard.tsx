@@ -42,8 +42,10 @@ interface OvertimeRisk {
   desiredHours: number
   assignedHours: number
   percentage: number
+  premiumShiftsCount: number
   isOverLimit: boolean
   isNearLimit: boolean
+  isUnderScheduled: boolean
 }
 
 interface ConstraintViolation {
@@ -66,6 +68,8 @@ interface FairnessMetrics {
   minHours: number
   maxHours: number
   fairnessScore: number
+  premiumFairnessScore: number
+  avgPremiumShifts: number
 }
 
 interface Warning {
@@ -99,9 +103,10 @@ function SeverityBadge({ severity }: { severity: string }) {
 function OvertimeRiskCard({ risk }: { risk: OvertimeRisk }) {
   const isOver = risk.isOverLimit
   const isNear = risk.isNearLimit && !isOver
+  const isUnder = risk.isUnderScheduled
 
   return (
-    <Card className={isOver ? "border-red-200 bg-red-50" : isNear ? "border-yellow-200 bg-yellow-50" : ""}>
+    <Card className={isOver ? "border-red-200 bg-red-50" : isNear ? "border-yellow-200 bg-yellow-50" : isUnder ? "border-blue-200 bg-blue-50" : ""}>
       <CardContent className="pt-6">
         <div className="flex items-center justify-between">
           <div>
@@ -113,7 +118,8 @@ function OvertimeRiskCard({ risk }: { risk: OvertimeRisk }) {
           <div className="flex items-center gap-2">
             {isOver && <Badge variant="destructive">Over Limit</Badge>}
             {isNear && <Badge variant="secondary">Near Limit</Badge>}
-            {!isOver && !isNear && <Badge variant="outline">OK</Badge>}
+            {isUnder && <Badge className="bg-blue-500 hover:bg-blue-600">Under Scheduled</Badge>}
+            {!isOver && !isNear && !isUnder && <Badge variant="outline">OK</Badge>}
           </div>
         </div>
         <Progress value={Math.min(risk.percentage, 100)} className="mt-2 h-2" />
@@ -204,7 +210,8 @@ export function AnalyticsDashboard() {
 
   const overLimitCount = overtimeRisks.filter(r => r.isOverLimit).length
   const nearLimitCount = overtimeRisks.filter(r => r.isNearLimit).length
-  const okCount = overtimeRisks.filter(r => !r.isOverLimit && !r.isNearLimit).length
+  const underScheduledCount = overtimeRisks.filter(r => r.isUnderScheduled).length
+  const okCount = overtimeRisks.filter(r => !r.isOverLimit && !r.isNearLimit && !r.isUnderScheduled).length
 
   const highViolations = constraintViolations.filter(v => v.severity === 'HIGH').length
   const mediumViolations = constraintViolations.filter(v => v.severity === 'MEDIUM').length
@@ -327,6 +334,13 @@ export function AnalyticsDashboard() {
                     <p className="text-sm text-yellow-600">Monitor closely</p>
                   </div>
                 </div>
+                <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <AlertCircleIcon className="h-5 w-5 text-blue-500" />
+                  <div>
+                    <p className="font-medium text-blue-800">{underScheduledCount} Under Scheduled</p>
+                    <p className="text-sm text-blue-600">&lt; 50% desired hours</p>
+                  </div>
+                </div>
                 <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
                   <CheckCircleIcon className="h-5 w-5 text-green-500" />
                   <div>
@@ -393,6 +407,43 @@ export function AnalyticsDashboard() {
           </Card>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Card className="col-span-1 lg:col-span-2">
+              <CardHeader>
+                <CardTitle>Distribution Report</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="text-xs text-muted-foreground uppercase bg-muted/50">
+                      <tr>
+                        <th className="px-4 py-3 rounded-tl-md">Staff Member</th>
+                        <th className="px-4 py-3 text-right">Desired Hours</th>
+                        <th className="px-4 py-3 text-right">Assigned Hours</th>
+                        <th className="px-4 py-3 text-right">Premium Shifts</th>
+                        <th className="px-4 py-3 text-right rounded-tr-md">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {overtimeRisks.map((staff) => (
+                        <tr key={staff.staffId} className="hover:bg-muted/30">
+                          <td className="px-4 py-3 font-medium">{staff.name}</td>
+                          <td className="px-4 py-3 text-right">{staff.desiredHours}h</td>
+                          <td className="px-4 py-3 text-right">{staff.assignedHours}h</td>
+                          <td className="px-4 py-3 text-right">{staff.premiumShiftsCount}</td>
+                          <td className="px-4 py-3 text-right">
+                            {staff.isOverLimit ? <Badge variant="destructive">Over</Badge> : 
+                             staff.isNearLimit ? <Badge variant="secondary">Near Limit</Badge> :
+                             staff.isUnderScheduled ? <Badge className="bg-blue-500">Under</Badge> :
+                             <Badge variant="outline">OK</Badge>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle>Distribution Stats</CardTitle>
@@ -417,6 +468,14 @@ export function AnalyticsDashboard() {
                 <div className="flex justify-between border-t pt-3">
                   <span className="text-muted-foreground">Fairness Score</span>
                   <span className="font-bold text-lg">{Math.round(fairnessMetrics.fairnessScore)}%</span>
+                </div>
+                <div className="flex justify-between border-t pt-3">
+                  <span className="text-muted-foreground">Premium Shift Fairness</span>
+                  <span className="font-bold text-lg text-primary">{Math.round(fairnessMetrics.premiumFairnessScore)}%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Avg Premium Shifts/Staff</span>
+                  <span className="font-bold">{fairnessMetrics.avgPremiumShifts}</span>
                 </div>
               </CardContent>
             </Card>

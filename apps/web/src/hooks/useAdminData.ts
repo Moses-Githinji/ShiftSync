@@ -66,3 +66,16 @@ export function useCreateUser() {
     }
   });
 }
+
+export function useUpdateUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: any }) => {
+      const { data } = await api.patch(`/users/${id}`, payload);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    }
+  });
+}

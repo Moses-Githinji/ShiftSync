@@ -52,10 +52,24 @@ async function main() {
       role: 'MANAGER',
       managedLocations: {
         create: [
-          { locationId: loc1.id },
-          { locationId: loc2.id },
           { locationId: loc3.id },
           { locationId: loc4.id }
+        ]
+      }
+    }
+  });
+
+  const managerUserNY = await prisma.user.create({
+    data: {
+      email: 'manager_ny@coastaleats.com',
+      passwordHash,
+      firstName: 'Manager',
+      lastName: 'NY',
+      role: 'MANAGER',
+      managedLocations: {
+        create: [
+          { locationId: loc1.id },
+          { locationId: loc2.id }
         ]
       }
     }
@@ -128,6 +142,28 @@ async function main() {
     include: { staffProfile: true }
   });
 
+  const user4 = await prisma.user.create({
+    data: {
+      email: 'alex_la@coastaleats.com',
+      passwordHash,
+      firstName: 'Alex',
+      lastName: 'LA',
+      role: 'STAFF',
+      staffProfile: {
+        create: {
+          desiredHoursPerWeek: 40,
+          certifications: {
+            create: { locationId: loc3.id }
+          },
+          skills: {
+            create: { skill: 'Bartender' }
+          }
+        }
+      }
+    },
+    include: { staffProfile: true }
+  });
+
   // 3. Create Shifts for next week
   const nextMonday = DateTime.now().setZone('America/New_York').startOf('week').plus({ weeks: 1 });
   
@@ -177,6 +213,19 @@ async function main() {
       startAt: nextFriday.set({ hour: 16 }).toJSDate(),
       endAt: nextFriday.plus({ days: 1 }).set({ hour: 0 }).toJSDate(),
       requiredSkill: 'Bartender',
+    }
+  });
+
+  // Shift 5: LA Shift
+  await prisma.shift.create({
+    data: {
+      locationId: loc3.id,
+      startAt: nextMonday.set({ hour: 10 }).toJSDate(),
+      endAt: nextMonday.set({ hour: 18 }).toJSDate(),
+      requiredSkill: 'Bartender',
+      assignments: {
+        create: { staffId: user4.staffProfile!.id }
+      }
     }
   });
 

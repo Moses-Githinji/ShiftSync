@@ -1,30 +1,35 @@
-import { Controller, Get, Post, Body, Patch, Param, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Query, BadRequestException } from '@nestjs/common';
 import { ShiftsService } from './shifts.service';
 import { CreateShiftDto } from './dto/create-shift.dto';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
 
 @Controller('shifts')
-@UseGuards(JwtAuthGuard, RolesGuard)
 export class ShiftsController {
   constructor(private readonly shiftsService: ShiftsService) {}
 
-  @Post()
-  @Roles(Role.ADMIN, Role.MANAGER)
-  create(@Body() createShiftDto: CreateShiftDto) {
-    return this.shiftsService.create(createShiftDto);
-  }
-
-  @Patch(':id/publish')
-  @Roles(Role.ADMIN, Role.MANAGER)
-  publish(@Param('id') id: string) {
-    return this.shiftsService.publish(id);
+  @Get('staff')
+  getStaff(@Query('locationId') locationId: string) {
+    if (!locationId) throw new BadRequestException('locationId is required');
+    return this.shiftsService.getStaffForLocation(locationId);
   }
 
   @Get()
-  findAll(@Query('locationId') locationId?: string) {
-    return this.shiftsService.findAll(locationId);
+  getShifts(@Query('locationId') locationId: string, @Query('weekStart') weekStart?: string) {
+    if (!locationId) throw new BadRequestException('locationId is required');
+    return this.shiftsService.getShifts(locationId, weekStart);
+  }
+
+  @Post()
+  createShift(@Body() createShiftDto: CreateShiftDto) {
+    return this.shiftsService.createShift(createShiftDto);
+  }
+
+  @Patch(':id/assign')
+  assignShift(@Param('id') id: string, @Body() body: { staffProfileId: string | null; date?: string }) {
+    return this.shiftsService.assignShift(id, body.staffProfileId, body.date);
+  }
+
+  @Patch('publish')
+  publishSchedule(@Body() body: { locationId: string }) {
+    return this.shiftsService.publishSchedule(body.locationId);
   }
 }

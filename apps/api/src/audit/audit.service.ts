@@ -5,22 +5,23 @@ import { PrismaService } from '../prisma/prisma.service';
 export class AuditService {
   constructor(private prisma: PrismaService) {}
 
-  async logAction(entityType: string, entityId: string, action: string, actorId?: string, details?: any) {
-    return this.prisma.auditLog.create({
-      data: {
-        entityType,
-        entityId,
-        action,
-        actorId,
-        after: details ? details : {},
-      }
-    });
-  }
-
-  async getLogs(entityId: string) {
-    return this.prisma.auditLog.findMany({
-      where: { entityId },
+  async getAuditLogs() {
+    const logs = await this.prisma.auditLog.findMany({
+      include: {
+        actor: {
+          select: { email: true }
+        }
+      },
       orderBy: { createdAt: 'desc' }
     });
+    
+    return logs.map(log => ({
+      id: log.id,
+      action: log.action,
+      user: log.actor?.email || 'System',
+      target: log.entityId, // we could join to get names but entityId is fine for demo
+      date: log.createdAt,
+      details: log.reason || ''
+    }));
   }
 }

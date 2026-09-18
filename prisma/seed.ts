@@ -1,10 +1,8 @@
-import { PrismaClient, Role, ShiftStatus } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
+import * as bcrypt from 'bcryptjs';
 import { DateTime } from 'luxon';
-import * as dotenv from 'dotenv';
-
-dotenv.config();
 
 const connectionString = process.env.DATABASE_URL || 'postgresql://shiftsync:password@localhost:5433/shiftsync_dev?schema=public';
 const pool = new Pool({ connectionString });
@@ -12,217 +10,130 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  console.log('Cleaning up existing data...');
-  await prisma.auditLog.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.swapRequest.deleteMany();
-  await prisma.dropRequest.deleteMany();
-  await prisma.shiftAssignment.deleteMany();
-  await prisma.shift.deleteMany();
-  await prisma.availabilityException.deleteMany();
-  await prisma.availabilityWindow.deleteMany();
-  await prisma.staffLocationCertification.deleteMany();
-  await prisma.staffSkill.deleteMany();
-  await prisma.managerLocation.deleteMany();
-  await prisma.location.deleteMany();
-  await prisma.staffProfile.deleteMany();
-  await prisma.user.deleteMany();
+  console.log('Seeding database...');
 
-  console.log('Creating Admin...');
-  const admin = await prisma.user.create({
+  // 1. Create Location
+  const location = await prisma.location.create({
     data: {
-      email: 'admin@coastaleats.com',
-      passwordHash: 'hashed_password', // mock
-      firstName: 'System',
-      lastName: 'Admin',
-      role: Role.ADMIN,
-    },
-  });
-
-  console.log('Creating Locations...');
-  const locNY = await prisma.location.create({
-    data: {
-      name: 'Coastal Eats - Manhattan',
+      name: 'Coastal Eats - Downtown',
       timezone: 'America/New_York',
-      address: '123 Broadway, NY',
-    },
-  });
-  const locBOS = await prisma.location.create({
-    data: {
-      name: 'Coastal Eats - Boston',
-      timezone: 'America/New_York',
-      address: '456 Harbor St, MA',
-    },
-  });
-  const locSF = await prisma.location.create({
-    data: {
-      name: 'Coastal Eats - San Francisco',
-      timezone: 'America/Los_Angeles',
-      address: '789 Market St, CA',
-    },
-  });
-  const locSEA = await prisma.location.create({
-    data: {
-      name: 'Coastal Eats - Seattle',
-      timezone: 'America/Los_Angeles',
-      address: '101 Pike St, WA',
-    },
+      address: '123 Main St',
+    }
   });
 
-  console.log('Creating Managers...');
-  const managerNY = await prisma.user.create({
+  // 2. Create Users & Staff Profiles
+  const passwordHash = await bcrypt.hash('password', 10);
+  
+  const user1 = await prisma.user.create({
     data: {
-      email: 'manager_ny@coastaleats.com',
-      passwordHash: 'hashed_password',
-      firstName: 'Alice',
-      lastName: 'Manager',
-      role: Role.MANAGER,
-      managedLocations: {
-        create: { locationId: locNY.id },
-      },
-    },
-  });
-
-  const managerSF = await prisma.user.create({
-    data: {
-      email: 'manager_sf@coastaleats.com',
-      passwordHash: 'hashed_password',
-      firstName: 'Bob',
-      lastName: 'Manager',
-      role: Role.MANAGER,
-      managedLocations: {
-        create: [{ locationId: locSF.id }, { locationId: locSEA.id }],
-      },
-    },
-  });
-
-  console.log('Creating Staff...');
-  // Staff 1: Bartender, certified in NY and BOS, morning availability
-  const staff1 = await prisma.user.create({
-    data: {
-      email: 'john_bartender@coastaleats.com',
-      passwordHash: 'hashed_password',
+      email: 'john@coastaleats.com',
+      passwordHash,
       firstName: 'John',
       lastName: 'Doe',
-      role: Role.STAFF,
-      staffProfile: {
-        create: {
-          desiredHoursPerWeek: 30,
-          skills: { create: [{ skill: 'bartender' }] },
-          certifications: {
-            create: [{ locationId: locNY.id }, { locationId: locBOS.id }],
-          },
-          availabilityWindows: {
-            create: Array.from({ length: 7 }).map((_, i) => ({
-              dayOfWeek: i,
-              startTime: '08:00',
-              endTime: '16:00',
-            })),
-          },
-        },
-      },
-    },
-    include: { staffProfile: true },
-  });
-
-  // Staff 2: Line Cook, certified in SF, evening availability (including overnight)
-  const staff2 = await prisma.user.create({
-    data: {
-      email: 'sarah_cook@coastaleats.com',
-      passwordHash: 'hashed_password',
-      firstName: 'Sarah',
-      lastName: 'Smith',
-      role: Role.STAFF,
+      role: 'STAFF',
       staffProfile: {
         create: {
           desiredHoursPerWeek: 40,
-          skills: { create: [{ skill: 'line_cook' }] },
           certifications: {
-            create: [{ locationId: locSF.id }],
-          },
-          availabilityWindows: {
-            create: Array.from({ length: 7 }).map((_, i) => ({
-              dayOfWeek: i,
-              startTime: '16:00',
-              endTime: '04:00',
-            })),
-          },
-        },
-      },
+            create: { locationId: location.id }
+          }
+        }
+      }
     },
-    include: { staffProfile: true },
+    include: { staffProfile: true }
   });
 
-  // Staff 3: Server, cross-timezone certification (SF + NY) for timezone tangle scenario
-  const staff3 = await prisma.user.create({
+  const user2 = await prisma.user.create({
     data: {
-      email: 'maria_server@coastaleats.com',
-      passwordHash: 'hashed_password',
-      firstName: 'Maria',
-      lastName: 'Garcia',
-      role: Role.STAFF,
+      email: 'sarah@coastaleats.com',
+      passwordHash,
+      firstName: 'Sarah',
+      lastName: 'Smith',
+      role: 'STAFF',
       staffProfile: {
         create: {
-          desiredHoursPerWeek: 25,
-          skills: { create: [{ skill: 'server' }] },
+          desiredHoursPerWeek: 40,
           certifications: {
-            create: [{ locationId: locSF.id }, { locationId: locNY.id }],
-          },
-          availabilityWindows: {
-            create: Array.from({ length: 7 }).map((_, i) => ({
-              dayOfWeek: i,
-              startTime: '09:00',
-              endTime: '17:00',
-            })),
-          },
-        },
-      },
+            create: { locationId: location.id }
+          }
+        }
+      }
     },
-    include: { staffProfile: true },
+    include: { staffProfile: true }
   });
 
-  console.log('Creating Shifts...');
-  // A published shift in NY
-  const shiftNY = await prisma.shift.create({
+  const user3 = await prisma.user.create({
     data: {
-      locationId: locNY.id,
-      startAt: DateTime.utc().plus({ days: 1 }).set({ hour: 13 }).toJSDate(), // 9 AM NY time
-      endAt: DateTime.utc().plus({ days: 1 }).set({ hour: 19 }).toJSDate(), // 3 PM NY time
-      requiredSkill: 'bartender',
-      headcount: 1,
-      status: ShiftStatus.PUBLISHED,
-      publishedAt: new Date(),
+      email: 'mike@coastaleats.com',
+      passwordHash,
+      firstName: 'Mike',
+      lastName: 'Johnson',
+      role: 'STAFF',
+      staffProfile: {
+        create: {
+          desiredHoursPerWeek: 20, // Part time
+          certifications: {
+            create: { locationId: location.id }
+          }
+        }
+      }
     },
+    include: { staffProfile: true }
   });
 
-  // Assign staff1
-  await prisma.shiftAssignment.create({
+  // 3. Create Shifts for next week
+  const nextMonday = DateTime.now().setZone('America/New_York').startOf('week').plus({ weeks: 1 });
+  
+  // Shift 1: John on Monday
+  await prisma.shift.create({
     data: {
-      shiftId: shiftNY.id,
-      staffId: staff1.staffProfile!.id,
-    },
+      locationId: location.id,
+      startAt: nextMonday.set({ hour: 9 }).toJSDate(),
+      endAt: nextMonday.set({ hour: 17 }).toJSDate(),
+      requiredSkill: 'Bartender',
+      assignments: {
+        create: { staffId: user1.staffProfile!.id }
+      }
+    }
   });
 
-  // A draft shift in SF (Overnight)
-  const shiftSF = await prisma.shift.create({
+  // Shift 2: Sarah on Tuesday
+  const nextTuesday = nextMonday.plus({ days: 1 });
+  await prisma.shift.create({
     data: {
-      locationId: locSF.id,
-      startAt: DateTime.utc().plus({ days: 2 }).set({ hour: 3 }).toJSDate(), // 8 PM SF time
-      endAt: DateTime.utc().plus({ days: 2 }).set({ hour: 11 }).toJSDate(), // 4 AM SF time next day
-      requiredSkill: 'line_cook',
-      headcount: 1,
-      status: ShiftStatus.DRAFT,
-    },
+      locationId: location.id,
+      startAt: nextTuesday.set({ hour: 10 }).toJSDate(),
+      endAt: nextTuesday.set({ hour: 18 }).toJSDate(),
+      requiredSkill: 'Server',
+      assignments: {
+        create: { staffId: user2.staffProfile!.id }
+      }
+    }
   });
 
-  await prisma.shiftAssignment.create({
+  // Shift 3: Unassigned Wednesday
+  const nextWednesday = nextMonday.plus({ days: 2 });
+  await prisma.shift.create({
     data: {
-      shiftId: shiftSF.id,
-      staffId: staff2.staffProfile!.id,
-    },
+      locationId: location.id,
+      startAt: nextWednesday.set({ hour: 17 }).toJSDate(),
+      endAt: nextWednesday.set({ hour: 23 }).toJSDate(),
+      requiredSkill: 'Line Cook',
+    }
   });
 
-  console.log('Seeding complete.');
+  // Shift 4: Unassigned Friday
+  const nextFriday = nextMonday.plus({ days: 4 });
+  await prisma.shift.create({
+    data: {
+      locationId: location.id,
+      startAt: nextFriday.set({ hour: 16 }).toJSDate(),
+      endAt: nextFriday.plus({ days: 1 }).set({ hour: 0 }).toJSDate(),
+      requiredSkill: 'Bartender',
+    }
+  });
+
+  console.log(`Database seeded! Location ID to use: ${location.id}`);
 }
 
 main()
